@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+
+# Build output (regenerated with `pnpm build` / `npx tsc`)
+dist/
+build/
+
+# Logs & debug
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# Test / coverage output
+coverage/
+.nyc_output/
+
+# Scratch & scraper-probe artifacts
+.probe/
+*.tmp
+*.local.mjs
