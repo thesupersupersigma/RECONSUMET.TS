@@ -35,6 +35,9 @@ vipertls/
 __pycache__/
 *.pyc
 
+# Personal todo (chat ids etc.) — never commit
+important.md
+
 # Scratch & scraper-probe artifacts
 .probe/
 *.tmp
@@ -42,3 +45,4 @@ __pycache__/
 *.local.py
 *.local.log
 *.local.json
+_*.txt
