@@ -133,7 +133,32 @@ Clear stray ad tabs if it gets slow: close each target via `curl http://localhos
 Dead ends / don't retry: legacy `META.Anilist` doesn't work with these providers (malsync/classic-gogo slugs).
 **AnimePahe** is blocked (RTB ad-gate + encrypted-JWE token challenge returns HTTP 204 to cloakbrowser).
 
-## Next options
-Self-host Fastify API/server (run on the Oracle VM with cloakbrowser); harden Gogoanime across many titles +
-dub support; external captions layer (Jimaku/OpenSubtitles by AniList id — would give AnimeUnity English subs);
-add a 3rd source for resilience.
+## Session 3 update — public API + the TLS-fingerprint blocker
+Goal locked: host this as a public API on the user's Oracle VM (ARM, lots of RAM), behind Cloudflare,
+rebranded away from "consumet" (license allows it). Git: commit after each milestone (3 commits so far on
+`master`; repo root = consumet-master).
+
+BUILT this session:
+- `api/` — Fastify service (separate from the library, imports `../consumet/dist`). Routes: `/`, `/search?q=`,
+  `/info/:anilistId` (mappings=sources), `/episodes/:anilistId?provider=`, `/watch?provider=&episodeId=&type=`,
+  and `/proxy?url=&ref=` (Referer-injecting HLS/vtt proxy + segment streaming + CORS). `/watch` returns
+  proxied + raw urls. Run: `cd api && pnpm start` (env PORT, CLOAK_CDP_URL, PUBLIC_URL).
+
+THE BLOCKER (last mile of playback):
+- megaplay's m3u8 lives on a rotating **Cloudflare CDN** (cdn.mewstream.buzz / streamzone1.site / cinewave2.site)
+  that gates on **TLS fingerprint (JA3/JA4)**. Real browser (cloakbrowser) → 200; any server fetch (Node/curl)
+  even with perfect Referer/headers → 403. Validated: there is **NO cf_clearance cookie** (cloakbrowser got 200
+  with zero CDN cookies), so cookie-harvesting is useless — it's the TLS handshake.
+- FIX = **ViperTLS** (github.com/walterwhite-69/ViperTLS, the user's recommendation) — pure-Python JA3/JA4/HTTP2
+  browser impersonation, MIT, runs as a lib OR `vipertls serve` HTTP proxy. Installed in `.venv-tls/`
+  (browser data in `vipertls/`, both gitignored). **VALIDATION PENDING** — `tls-test.local.py` (gitignored)
+  fetches a gated m3u8 via `vipertls.Client(impersonate="chrome_*")`; first call HUNG (likely warming its
+  bundled chromium under low RAM). NEXT: retry the validation with RAM free; if it returns 200 + `#EXTM3U`,
+  wire the proxy to fetch CDN m3u8/segments through ViperTLS (lib call, or route through `vipertls serve` as a
+  sidecar). Then playback works server-side end-to-end.
+
+RAM: user is on an **8GB Mac** → tight. cloakbrowser (Docker Chromium) ~4GB + Node + ViperTLS's chromium.
+Stop background node procs each session (I do); `docker stop cloak` when idle; cap Docker memory ~2GB.
+
+Still deferred: external captions (Jimaku/OpenSubtitles need keys — see Captions section); harden Gogoanime
+across titles/dub; 3rd source. AnimePahe blocked (JWE/ad gate). Then: redis cache, docker-compose, deploy.

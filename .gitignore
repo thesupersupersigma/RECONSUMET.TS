@@ -29,7 +29,16 @@ Thumbs.db
 coverage/
 .nyc_output/
 
+# Python / ViperTLS (TLS-impersonation sidecar)
+.venv*/
+vipertls/
+__pycache__/
+*.pyc
+
 # Scratch & scraper-probe artifacts
 .probe/
 *.tmp
 *.local.mjs
+*.local.py
+*.local.log
+*.local.json
