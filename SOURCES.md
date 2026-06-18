@@ -44,17 +44,31 @@ Built: `src/providers/anime/animenosub.ts` + extractors `megaplay.ts` (had it),
 | anidb.app | ⛔ HARD (403 "Just a moment") | unknown (gated) | needs browser | UI only exposes AUDIO eng/jpn; servers hidden | LOW |
 | senshi.live | soft (200) | SPA, "New Website" (near-empty) | none in static HTML | Hard Sub: Server 1, DUB: Server 1 | LOW |
 
-### anineko.to — HIGH priority (has a "Soft Sub" category)
+### anineko.to — HIGH value, but BLOCKED on dynamic recon (attempted, see below)
 - Search `GET /browser?keyword=<q>` → server-rendered `/watch/<slug>` links (browser-free ✅).
-- Watch page server-rendered (title, episodes) but the **player/servers load via
-  `assets/js/nekovault.js`** (JS) — embed host NOT in static HTML. Backend cover
-  CDN = `cdn.anizara.store` (note "anizara" — maybe a shared backend).
-- Server list (Hard Sub / **Soft Sub** / DUB): HD-1, HD-2, StreamHG, Earnvids, Doodstream.
-- **Why it matters:** the explicit *Soft Sub* category + HD-1/HD-2 strongly suggests
-  extractable `.vtt` for simulcasts — the gap AnimeNoSub couldn't fill.
-- **Next:** reverse `nekovault.js` to find the source endpoint (likely an
-  encrypted/JSON API like Nova) OR render via cloakbrowser. Confirm HD-1/HD-2 =
-  megacloud vs megaplay, and whether `getSources` returns soft EN tracks.
+- Anime page (`/watch/<slug>`, `?ep=N`) is the **info page**: server-rendered title +
+  episode grid (`.nv-info-episode-item`, `data-content-id`/`data-episode`/`data-folder`),
+  but it contains **NO player, no iframe, no `.server` elements, no external player
+  domain** (only `cdn.anizara.store` for covers). data id example: content-id `8716`.
+- **Player mechanism (from `js/function.js`):** servers render as
+  `#player-server .server-items .server[data-video=<embedUrl>]`; click → `loadIframePlayer2(data-video)`.
+  So once you HAVE the `.server` DOM, the embed URL is just `data-video`. But the code
+  that POPULATES those `.server` elements is NOT in `function.js` / `nekovault.js`
+  (both fully grepped — only UI: search, featured-genre, watchlist, captcha).
+- **Reverse attempt (June 2026, FAILED statically):** the server-load XHR endpoint
+  isn't in any static file. Endpoint-guessing is dead: ALL unknown `/ajax/*` 302→`/home`
+  (catch-all), so guesses can't enumerate it. Page shows `data-logged-in="0"` — the
+  player load MAY be session/login-gated. cloakbrowser was NOT running to capture it.
+- **Why still worth it:** the only candidate with an explicit *Soft Sub* category +
+  HD-1/HD-2 → best shot at extractable simulcast `.vtt`.
+- **NEXT (clean unblock):** start cloakbrowser, render a `?ep=N` watch page, and
+  **capture the network request** that fills `#player-server` (DevTools/CDP network log).
+  That reveals the real endpoint + params (and whether login is needed). Then reverse
+  it like Nova. Until that XHR is captured, HD-1/HD-2 = megaplay-vs-megacloud and the
+  soft-sub question are UNCONFIRMED.
+- **Pattern note:** these newer clones (anineko, likely anikototv/reanime too) hide the
+  player behind JS+session, unlike AnimeNoSub (base64 servers in static HTML). Expect
+  all of them to need cloakbrowser network-capture for the source step.
 
 ### anikototv.to — MED (also hosts hentai categories)
 - Search `GET /search?keyword=<q>` → 200, `/watch/<slug>` links (browser-free ✅). `/filter?keyword=` also works.
