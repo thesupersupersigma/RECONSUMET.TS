@@ -9,6 +9,7 @@ export const PROVIDERS_LIST = {
   ANIME: [
     new ANIME.AniNeko(),
     new ANIME.AnimeNoSub(),
+    new ANIME.AnikotoTV(),
     new ANIME.ReAnime(),
     new ANIME.Gogoanime(),
     new ANIME.AnimePahe(),

@@ -4,6 +4,7 @@ import { AnimeParser, IAnimeEpisode, ISource } from '../../models';
 import { compareTwoStrings } from '../../utils/utils';
 import AniNeko from '../anime/anineko';
 import AnimeNoSub from '../anime/animenosub';
+import AnikotoTV from '../anime/anikototv';
 import Gogoanime from '../anime/gogoanime';
 import AnimeUnity from '../anime/animeunity';
 
@@ -41,12 +42,19 @@ class AnimeAggregator {
   private readonly client: AxiosInstance = axios.create({ timeout: 20000 });
   readonly providers: AnimeParser[];
 
-  /** @param providers anime providers to aggregate (default: AniNeko + AnimeNoSub + Gogoanime + AnimeUnity) */
+  /** @param providers anime providers to aggregate (default: AniNeko + AnimeNoSub + AnikotoTV + Gogoanime + AnimeUnity) */
   constructor(providers?: AnimeParser[]) {
     // AniNeko first: browser-free AND carries soft English subs for simulcasts.
     // AnimeNoSub second: browser-free, megaplay soft subs on the back-catalog.
+    // AnikotoTV third: browser-free (nekostream backend), HD-1 = megaplay soft subs.
     // Gogoanime/AnimeUnity are fallbacks.
-    this.providers = providers ?? [new AniNeko(), new AnimeNoSub(), new Gogoanime(), new AnimeUnity()];
+    this.providers = providers ?? [
+      new AniNeko(),
+      new AnimeNoSub(),
+      new AnikotoTV(),
+      new Gogoanime(),
+      new AnimeUnity(),
+    ];
   }
 
   /** AniList search (no scraping). */
