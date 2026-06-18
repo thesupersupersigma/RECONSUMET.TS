@@ -2,6 +2,7 @@ import axios, { AxiosInstance } from 'axios';
 
 import { AnimeParser, IAnimeEpisode, ISource } from '../../models';
 import { compareTwoStrings } from '../../utils/utils';
+import AnimeNoSub from '../anime/animenosub';
 import Gogoanime from '../anime/gogoanime';
 import AnimeUnity from '../anime/animeunity';
 
@@ -39,9 +40,11 @@ class AnimeAggregator {
   private readonly client: AxiosInstance = axios.create({ timeout: 20000 });
   readonly providers: AnimeParser[];
 
-  /** @param providers anime providers to aggregate (default: Gogoanime + AnimeUnity) */
+  /** @param providers anime providers to aggregate (default: AnimeNoSub + Gogoanime + AnimeUnity) */
   constructor(providers?: AnimeParser[]) {
-    this.providers = providers ?? [new Gogoanime(), new AnimeUnity()];
+    // AnimeNoSub first: fully browser-free + English subs on the back-catalog, so
+    // the common case needs no cloakbrowser. Gogoanime/AnimeUnity are fallbacks.
+    this.providers = providers ?? [new AnimeNoSub(), new Gogoanime(), new AnimeUnity()];
   }
 
   /** AniList search (no scraping). */

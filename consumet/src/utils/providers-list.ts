@@ -7,6 +7,7 @@ import { ANIME, MANGA, BOOKS, COMICS, LIGHT_NOVELS, MOVIES, META, NEWS } from '.
  */
 export const PROVIDERS_LIST = {
   ANIME: [
+    new ANIME.AnimeNoSub(),
     new ANIME.Gogoanime(),
     new ANIME.AnimePahe(),
     new ANIME.AnimeUnity(),
