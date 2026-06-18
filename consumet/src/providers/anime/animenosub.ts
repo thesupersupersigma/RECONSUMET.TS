@@ -16,7 +16,7 @@ import {
   ProxyConfig,
 } from '../../models';
 import { USER_AGENT } from '../../utils';
-import { MegaPlay, VidMoly } from '../../extractors';
+import { MegaPlay, Nova, VidMoly } from '../../extractors';
 
 /** one decoded entry from the episode page's `<select class="mirror">` */
 interface Mirror {
@@ -161,10 +161,16 @@ class AnimeNoSub extends AnimeParser {
   /**
    * Resolve a playable source for an episode.
    *
-   * Preference: **MegaPlay/HD** first (it carries English subtitles), then
-   * **Omega/Vidmoly** (video only — captions come from the external subtitle
-   * layer). The **Moon** (Filemoon/Byse) and **Nova** servers use encrypted /
-   * session-bound backends and are not yet supported; they raise a clear error.
+   * Preference order (all browser-free):
+   *  1. **MegaPlay/HD** — back-catalog; carries soft **English subtitle** tracks
+   *     (multi-language, toggleable). The only server with extractable captions.
+   *  2. **Nova** — simulcast; multiplexed across CDNs (robust). Hardsubbed
+   *     ("SUB" encode has English burned in), so no separate caption track.
+   *  3. **Omega/Vidmoly** — simulcast fallback; also hardsubbed, single CDN.
+   *
+   * The **Moon** (Filemoon/Byse) server uses a session-bound GraphQL API and is
+   * not supported. If nothing usable is present, a clear error lists what was
+   * offered.
    *
    * @param episodeId episode slug, e.g. `naruto-shippuden-episode-1`
    * @param server reserved for explicit server selection (unused for now)
@@ -188,6 +194,11 @@ class AnimeNoSub extends AnimeParser {
         return await new MegaPlay(this.proxyConfig, this.adapter).extract(new URL(megaplay.url));
       }
 
+      const nova = pool.find(m => /nova\.upn\./i.test(m.url));
+      if (nova) {
+        return await new Nova(this.proxyConfig, this.adapter).extract(new URL(nova.url));
+      }
+
       const vidmoly = pool.find(m => /vidmoly\./i.test(m.url));
       if (vidmoly) {
         const origin = new URL(vidmoly.url).origin;
@@ -201,8 +212,8 @@ class AnimeNoSub extends AnimeParser {
       const offered = [...new Set(mirrors.map(m => `${m.name} (${m.type})`))].join(', ');
       throw new Error(
         `no supported server for this episode. Offered: ${offered || 'none'}. ` +
-          `Supported: MegaPlay/HD (with subs) and Omega/Vidmoly (video). ` +
-          `Moon (Filemoon/Byse) and Nova use encrypted backends — not yet supported.`
+          `Supported: MegaPlay/HD (subs), Nova and Omega/Vidmoly (video). ` +
+          `Moon (Filemoon/Byse) uses a session-bound backend — not supported.`
       );
     } catch (err) {
       throw new Error(`Failed to fetch episode sources: ${(err as Error).message}`);

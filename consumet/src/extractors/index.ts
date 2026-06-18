@@ -9,6 +9,7 @@ import Mp4Upload from './mp4upload';
 import RapidCloud from './rapidcloud';
 import MegaCloud from './megacloud';
 import MegaPlay from './megaplay';
+import Nova from './nova';
 import SmashyStream from './smashystream';
 import StreamHub from './streamhub';
 import StreamLare from './streamlare';
@@ -32,6 +33,7 @@ export {
   RapidCloud,
   MegaCloud,
   MegaPlay,
+  Nova,
   SmashyStream,
   StreamHub,
   StreamLare,

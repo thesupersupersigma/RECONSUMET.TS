@@ -20,6 +20,7 @@ import {
   Mp4Upload,
   StreamWish,
   MegaPlay,
+  Nova,
 } from './extractors';
 import {
   IProviderStats,
@@ -117,4 +118,5 @@ export {
   StreamWish,
   VidMoly,
   MegaPlay,
+  Nova,
 };
