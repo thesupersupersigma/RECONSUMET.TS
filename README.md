@@ -25,6 +25,7 @@ HTTP API with a built-in HLS/subtitle proxy. Designed to run on your own machine
 |---|---|---|---|
 | **AniNeko** | ✅ | ✅ soft, incl. simulcasts | default; subs ride in the embed URL |
 | **AnimeNoSub** | ✅ | ✅ soft (back-catalog via megaplay) | simulcast video via Nova/Vidmoly (hardsub) |
+| **AnikotoTV** | ✅ | ✅ soft (HD-1 via megaplay) | nekostream backend; reuses megaplay + vibeplayer |
 | **Gogoanime** | needs a headless browser (CDP) | ✅ soft via megaplay | fallback only |
 | **AnimeUnity** | ✅ | ❌ (Italian) | fallback video |
 
