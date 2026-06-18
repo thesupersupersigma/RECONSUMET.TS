@@ -1,6 +1,7 @@
 import AsianLoad from './asianload';
 import BilibiliExtractor from './bilibili';
 import Filemoon from './filemoon';
+import FlixCloud from './flixcloud';
 import GogoCDN from './gogocdn';
 import Kwik from './kwik';
 import MixDrop from './mixdrop';
@@ -26,6 +27,7 @@ export {
   AsianLoad,
   BilibiliExtractor,
   Filemoon,
+  FlixCloud,
   GogoCDN,
   Kwik,
   MixDrop,

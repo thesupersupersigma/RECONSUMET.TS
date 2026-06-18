@@ -40,7 +40,7 @@ Built: `src/providers/anime/animenosub.ts` + extractors `megaplay.ts` (had it),
 |---|---|---|---|---|---|
 | anineko.to | soft (200) | hianime-style clone | ✅ all browser-free | HD-1, HD-2, StreamHG, Earnvids, Doodstream | ✅ **DONE** |
 | anikototv.to | soft (200) | Laravel-ish (csrf), partly JS | ✅ `/search?keyword=` (also `/filter?`) | SUB/DUB: VidPlay-1, HD-1, Vidstream-2, VidCloud-1 (+ H-SUB/A-DUB = hentai: Kiwi-Stream, Download) | MED |
-| reanime.to | soft (200) | JS (`window.__`) | `/search?` (form) | SUB: HD-2, DUB: HD-2 | MED |
+| reanime.to | soft (200) | **SvelteKit** + REST API | ✅ `/api/v1/search?q=` (browser-free) | HD-2 = flixcloud.cc | 🟡 **PARTIAL** (subs ✅, video crack pending) |
 | mkissa.to/anime | soft (200) | **Svelte SPA** | API JSON (path TBD; `/api/search` is 404-JSON so namespace exists) | Luf-Mp4, Fm-Hls, Vn-Hls, Uni, Mp4, Ok | MED |
 | anidb.app | ⛔ HARD (403 "Just a moment") | unknown (gated) | needs browser | UI only exposes AUDIO eng/jpn; servers hidden | LOW |
 | senshi.live | soft (200) | SPA, "New Website" (near-empty) | none in static HTML | Hard Sub: Server 1, DUB: Server 1 | LOW |
@@ -74,10 +74,50 @@ Fully **browser-free** once you use the right URL. Built `src/providers/anime/an
   family** (hard, rotating keys) — but we have `vidcloud.ts`/`rapidcloud.ts`/`megacloud.ts`/`vizcloud.ts`. HD-1 may be megaplay/megacloud.
 - **Next:** find how the source loads (page is partly JS); test if HD-1 = megaplay (easy) and carries soft subs.
 
-### reanime.to — MED (small, simple)
-- Only one server (HD-2) for both SUB and DUB → if HD-2 = megaplay/megacloud, this
-  is an easy add with potential soft subs.
-- **Next:** find HD-2 backend host (likely megaplay s-2 or megacloud).
+### reanime.to — 🟡 PARTIAL (subs DONE, video crack PENDING) — built `reanime.ts`
+**SvelteKit site with a clean, browser-free REST API.** Built
+`src/providers/anime/reanime.ts` + `src/extractors/flixcloud.ts`, registered in
+anime index + providers-list. **NOT in the aggregator default chain yet** (no video).
+- Stack signature: `/assets/immutable/` = SvelteKit. Search results render
+  client-side; the real data is a REST API:
+  - Search:   `GET /api/v1/search?q=<query>&limit=20` → `results[].anime_id` (slug),
+    AniList-backed (`cover_image` = `anilistcdn/.../bx<anilistId>-…jpg`).
+  - Episodes: `GET /api/v1/anime/<slug>/episodes?limit=2000` → `data[].episode_number`.
+  - Metadata: `GET /api/v1/watch/<slug>?ep=1` → title/cover (+ AniList id via the `bx…` url).
+  - **Servers: `GET /api/flix/<ANILIST_ID>/<ep>`** → `{success,servers:[{serverName:"HD-2",
+    dataLink:"https://flixcloud.cc/e/<id>?v=2",dataType:"sub|dub"}]}`. (Keyed by AniList
+    media id — which our aggregator already knows. Response can append trailing bytes;
+    parse `dataLink`/`dataType` with a regex, not strict JSON.)
+- **SOFT SUBS = the win (DONE):** the flixcloud embed ships a SvelteKit data payload
+  with a plain, **unencrypted** `subtitles:[{url,language,format:"ass"}]` array of
+  `.ass` files on `*.overcdn.site` (fansub/Aegisub-grade, styled — e.g. "English (Full
+  Subtitles)"). `FlixCloud` extractor regexes them out: `url:"…\.ass",language:"…"`.
+  Verified e2e on Re:Zero S1 ep1 → 2 English `.ass` tracks (200, valid Aegisub). These
+  are higher-quality/styled vs the `.vtt` we get elsewhere → also a candidate
+  **subtitle-supplement** source for other providers' video later.
+
+#### ⛔ flixcloud stream crack — PENDING (do on high/xhigh when usage is good)
+The m3u8 is behind a **megacloud-tier** wall (deliberate, rotating). Recovered
+client-side in `flixcloud.cc` node `11.HnY02FpX.js`, fn `Se()`. Full recipe:
+1. **Deobfuscate field names** with `obfuscation_seed` (fn `_e(seed)` resolves the
+   randomized keys in the inline `data` payload).
+2. **Token round-trip**: fetch `/api/…` (the `fetch(` in node 11) → returns more
+   crypto material (`frag1_b64` + token fragments `v`,`T`). ("Incomplete token response".)
+3. **WASM cipher** `w_payload` (base64, 279 bytes; exports `_s`,`_r`,`_c`) — ALREADY
+   DECODED, fully portable to JS, no wasm needed:
+   - `_s(x)` → sets `seed` global.
+   - `_r(A,B,C,Out,len)`: `for i: v=A[i]^B[i]^C[i]; v^=0x48; v=((v<<2)|(v>>6))&0xFF; v^=0xF2; v^=((i*60+seed)&0xFF); Out[i]=v`.
+   - `_c()`: `for i in 0..32: mem[0x810+i]=mem[0x7D0+i]^mem[0x7F0+i]` (returns 0x810; this
+     path feeds `window.__pk`). seed `_ = parseInt(obfuscation_seed.substring(0,8),16)`.
+   - Call shape in `ke(t,e,s,o)`: writes t@1000, e@2000, s@3000, calls `_s(seed)` then `_r`.
+4. **PBKDF2**: `crypto.subtle.importKey("raw", E, {name:"PBKDF2"}, …deriveBits)` on the
+   WASM output `E`.
+5. **AES-256-CBC** decrypt the manifest (`obfuscated_crypto_data.…{kf_*=key, ivf_*=iv,
+   metadata.encoding:"aes256cbc"}`) → the m3u8 URL (TextDecoder).
+- Saved artifacts (regenerate if site rotates): node 11 = `flixcloud.cc/res/immutable/nodes/11.HnY02FpX.js`;
+  WASM = the `w_payload` base64 in any embed's inline data.
+- When done: implement in `flixcloud.ts` (fill `sources`), then add `ReAnime` to the
+  aggregator default array in `meta/aggregator.ts`.
 
 ### mkissa.to — MED (Svelte SPA, the "weird UI")
 - Servers: Luf-Mp4, **Fm-Hls** (Filemoon HLS), Vn-Hls, Uni, Mp4, Ok.
@@ -105,6 +145,7 @@ Fully **browser-free** once you use the right URL. Built `src/providers/anime/an
 | Filemoon, Fm-Hls | filemoon (classic .sx packed-eval) | ❌ hardsub | filemoon ✅ (classic only) |
 | Vidmoly, Omega | vidmoly | ❌ hardsub | ✅ (fixed) |
 | Nova | nova.upn.one (AES, cracked) | ❌ hardsub | ✅ (new) |
+| HD-2 (reanime) | flixcloud.cc | ✅ **soft `.ass`** (free) | subs ✅; video crack pending (WASM+PBKDF2+AES+token) |
 | Doodstream | dood | ❌ hardsub | ❌ need one |
 | StreamHG | streamwish/filelions family | ❌ hardsub | streamwish ✅ (maybe) |
 | Earnvids | vidhide/streamwish family | ❌ hardsub | partial |
@@ -112,9 +153,10 @@ Fully **browser-free** once you use the right URL. Built `src/providers/anime/an
 
 ## Recommended next target
 **anineko.to is DONE** and is now the primary source (browser-free + soft simulcast
-subs). Remaining candidates, easiest-first:
-- **reanime.to** — single HD-2 server; check if `/watch/<slug>/ep-N` (or similar)
-  server-renders `data-video` like anineko. If HD-2 = vibeplayer/megaplay-style, quick win.
+subs). **reanime.to is PARTIAL** (browser-free API + free `.ass` soft subs built;
+flixcloud video crack pending — see its section). Remaining candidates, easiest-first:
+- **reanime.to flixcloud crack** — the one big-ticket item; do on high/xhigh when
+  usage is good. Full decoded recipe is in the reanime section above.
 - **anikototv.to** — browser-free search; check the player URL pattern; VidCloud/Vidstream
   = megacloud family (may carry soft subs too). Note: also hosts hentai.
 - **mkissa.to** — map the SvelteKit JSON API.

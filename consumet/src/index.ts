@@ -22,6 +22,7 @@ import {
   MegaPlay,
   Nova,
   VibePlayer,
+  FlixCloud,
 } from './extractors';
 import {
   IProviderStats,
@@ -121,4 +122,5 @@ export {
   MegaPlay,
   Nova,
   VibePlayer,
+  FlixCloud,
 };
