@@ -8,6 +8,7 @@ import {
   IAnimeResult,
   IAnimeEpisode,
   IEpisodeServer,
+  IVideo,
   ISource,
   StreamingServers,
   SubOrSub,
@@ -15,7 +16,7 @@ import {
   ProxyConfig,
 } from '../../models';
 import { USER_AGENT } from '../../utils';
-import { MegaPlay } from '../../extractors';
+import { MegaPlay, VidMoly } from '../../extractors';
 
 /** one decoded entry from the episode page's `<select class="mirror">` */
 interface Mirror {
@@ -158,8 +159,15 @@ class AnimeNoSub extends AnimeParser {
   };
 
   /**
+   * Resolve a playable source for an episode.
+   *
+   * Preference: **MegaPlay/HD** first (it carries English subtitles), then
+   * **Omega/Vidmoly** (video only — captions come from the external subtitle
+   * layer). The **Moon** (Filemoon/Byse) and **Nova** servers use encrypted /
+   * session-bound backends and are not yet supported; they raise a clear error.
+   *
    * @param episodeId episode slug, e.g. `naruto-shippuden-episode-1`
-   * @param server unused in phase 1 (MegaPlay/HD is the only wired backend)
+   * @param server reserved for explicit server selection (unused for now)
    * @param subOrDub `sub` (default) or `dub`
    */
   override fetchEpisodeSources = async (
@@ -171,20 +179,31 @@ class AnimeNoSub extends AnimeParser {
       const mirrors = await this.parseMirrors(episodeId);
       if (mirrors.length === 0) throw new Error('no servers found on episode page');
 
-      // prefer a megaplay ("HD") mirror matching the requested type → English subs.
+      // prefer the requested type (sub/dub); fall back to any if none match
       const ofType = mirrors.filter(m => m.type === subOrDub);
       const pool = ofType.length ? ofType : mirrors;
-      const megaplay = pool.find(m => /megaplay\./i.test(m.url));
 
-      if (!megaplay) {
-        const offered = [...new Set(mirrors.map(m => `${m.name} (${m.type})`))].join(', ');
-        throw new Error(
-          `no MegaPlay/HD server for this episode (only supported backend in phase 1). ` +
-            `This episode offers: ${offered || 'none'} — Moon/Omega/Nova extractors are TODO.`
-        );
+      const megaplay = pool.find(m => /megaplay\./i.test(m.url));
+      if (megaplay) {
+        return await new MegaPlay(this.proxyConfig, this.adapter).extract(new URL(megaplay.url));
       }
 
-      return await new MegaPlay(this.proxyConfig, this.adapter).extract(new URL(megaplay.url));
+      const vidmoly = pool.find(m => /vidmoly\./i.test(m.url));
+      if (vidmoly) {
+        const origin = new URL(vidmoly.url).origin;
+        const sources = (await new VidMoly(this.proxyConfig, this.adapter).extract(
+          new URL(vidmoly.url)
+        )) as IVideo[];
+        // Vidmoly's m3u8 CDN is Referer-locked to the embed origin.
+        return { headers: { Referer: `${origin}/` }, sources, subtitles: [] };
+      }
+
+      const offered = [...new Set(mirrors.map(m => `${m.name} (${m.type})`))].join(', ');
+      throw new Error(
+        `no supported server for this episode. Offered: ${offered || 'none'}. ` +
+          `Supported: MegaPlay/HD (with subs) and Omega/Vidmoly (video). ` +
+          `Moon (Filemoon/Byse) and Nova use encrypted backends — not yet supported.`
+      );
     } catch (err) {
       throw new Error(`Failed to fetch episode sources: ${(err as Error).message}`);
     }

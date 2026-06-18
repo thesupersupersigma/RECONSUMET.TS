@@ -1,4 +1,5 @@
 import { VideoExtractor, IVideo } from '../models';
+import { USER_AGENT } from '../utils';
 
 class VidMoly extends VideoExtractor {
   protected override serverName = 'vidmoly';
@@ -6,15 +7,15 @@ class VidMoly extends VideoExtractor {
 
   override extract = async (videoUrl: URL): Promise<IVideo[]> => {
     try {
-      const { data } = await this.client.get(videoUrl.href);
+      const origin = `${videoUrl.protocol}//${videoUrl.host}/`;
+      const headers = { 'User-Agent': USER_AGENT, Referer: origin };
+      const { data } = await this.client.get(videoUrl.href, { headers });
 
-      const links = data.match(/file:\s*"([^"]+)"/);
+      // jwplayer's `file:` may use single OR double quotes
+      const links = data.match(/file:\s*["']([^"']+)["']/);
+      if (!links?.[1]) throw new Error('vidmoly: no source file found on embed page');
 
-      const m3u8Content = await this.client.get(links[1], {
-        headers: {
-          Referer: videoUrl.href,
-        },
-      });
+      const m3u8Content = await this.client.get(links[1], { headers });
 
       this.sources.push({
         quality: 'auto',
