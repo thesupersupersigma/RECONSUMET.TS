@@ -10,14 +10,15 @@ used `naruto`/`rezero` side stories). Keep this updated as sites are built.
 - 🔵 **CANDIDATE** — known, needs recon
 - ⛔ **BLOCKED** — hard anti-bot / not worth it yet
 
-## The thing we keep optimizing for: SOFT captions
-Provider-native **soft** (separate, toggleable, multi-language `.vtt`) subtitles
-come almost exclusively from the **megacloud / megaplay "HD" server family** —
-their `getSources` JSON returns `tracks[]` incl. English. Hardsub servers
-(Filemoon, Vidmoly, Nova, Dood, StreamHG…) burn subs into the video → no
-extractable track. **So when a site lists an "HD-1/HD-2" server, that's the one
-to chase for soft subs — even on simulcasts.** Back-catalog on AnimeNoSub already
-proves this (megaplay → 7-language soft subs).
+## The thing we keep optimizing for: SOFT captions  — SOLVED for simulcasts
+Provider-native **soft** (separate, toggleable `.vtt`) subtitles:
+- **AniNeko (✅ DONE)** — Soft-Sub servers attach a separate English `.vtt` right in
+  the `data-video` query string. This is the project's source of extractable
+  **simulcast** captions (the long-standing gap).
+- **megaplay / megacloud "HD" family** — `getSources` returns `tracks[]` incl. English
+  (AnimeNoSub back-catalog → 7-language soft subs).
+- Hardsub servers (Filemoon, Vidmoly, Nova, Dood, StreamHG…) burn subs in → no track.
+**When a site lists "HD-1/HD-2" or a "Soft Sub" toggle, chase those for soft subs.**
 
 ---
 
@@ -37,38 +38,33 @@ Built: `src/providers/anime/animenosub.ts` + extractors `megaplay.ts` (had it),
 
 | Site | CF wall | Stack | Search (browser-free?) | Reported servers | Priority |
 |---|---|---|---|---|---|
-| anineko.to | soft (200) | hianime-style clone, `nekovault.js` | ✅ `/browser?keyword=` | Soft/Hard Sub + DUB: HD-1, HD-2, StreamHG, Earnvids, Doodstream | **HIGH** |
+| anineko.to | soft (200) | hianime-style clone | ✅ all browser-free | HD-1, HD-2, StreamHG, Earnvids, Doodstream | ✅ **DONE** |
 | anikototv.to | soft (200) | Laravel-ish (csrf), partly JS | ✅ `/search?keyword=` (also `/filter?`) | SUB/DUB: VidPlay-1, HD-1, Vidstream-2, VidCloud-1 (+ H-SUB/A-DUB = hentai: Kiwi-Stream, Download) | MED |
 | reanime.to | soft (200) | JS (`window.__`) | `/search?` (form) | SUB: HD-2, DUB: HD-2 | MED |
 | mkissa.to/anime | soft (200) | **Svelte SPA** | API JSON (path TBD; `/api/search` is 404-JSON so namespace exists) | Luf-Mp4, Fm-Hls, Vn-Hls, Uni, Mp4, Ok | MED |
 | anidb.app | ⛔ HARD (403 "Just a moment") | unknown (gated) | needs browser | UI only exposes AUDIO eng/jpn; servers hidden | LOW |
 | senshi.live | soft (200) | SPA, "New Website" (near-empty) | none in static HTML | Hard Sub: Server 1, DUB: Server 1 | LOW |
 
-### anineko.to — HIGH value, but BLOCKED on dynamic recon (attempted, see below)
-- Search `GET /browser?keyword=<q>` → server-rendered `/watch/<slug>` links (browser-free ✅).
-- Anime page (`/watch/<slug>`, `?ep=N`) is the **info page**: server-rendered title +
-  episode grid (`.nv-info-episode-item`, `data-content-id`/`data-episode`/`data-folder`),
-  but it contains **NO player, no iframe, no `.server` elements, no external player
-  domain** (only `cdn.anizara.store` for covers). data id example: content-id `8716`.
-- **Player mechanism (from `js/function.js`):** servers render as
-  `#player-server .server-items .server[data-video=<embedUrl>]`; click → `loadIframePlayer2(data-video)`.
-  So once you HAVE the `.server` DOM, the embed URL is just `data-video`. But the code
-  that POPULATES those `.server` elements is NOT in `function.js` / `nekovault.js`
-  (both fully grepped — only UI: search, featured-genre, watchlist, captcha).
-- **Reverse attempt (June 2026, FAILED statically):** the server-load XHR endpoint
-  isn't in any static file. Endpoint-guessing is dead: ALL unknown `/ajax/*` 302→`/home`
-  (catch-all), so guesses can't enumerate it. Page shows `data-logged-in="0"` — the
-  player load MAY be session/login-gated. cloakbrowser was NOT running to capture it.
-- **Why still worth it:** the only candidate with an explicit *Soft Sub* category +
-  HD-1/HD-2 → best shot at extractable simulcast `.vtt`.
-- **NEXT (clean unblock):** start cloakbrowser, render a `?ep=N` watch page, and
-  **capture the network request** that fills `#player-server` (DevTools/CDP network log).
-  That reveals the real endpoint + params (and whether login is needed). Then reverse
-  it like Nova. Until that XHR is captured, HD-1/HD-2 = megaplay-vs-megacloud and the
-  soft-sub question are UNCONFIRMED.
-- **Pattern note:** these newer clones (anineko, likely anikototv/reanime too) hide the
-  player behind JS+session, unlike AnimeNoSub (base64 servers in static HTML). Expect
-  all of them to need cloakbrowser network-capture for the source step.
+### anineko.to — ✅ DONE (commit 94cf660) — the SOFT-SUBTITLE win
+Fully **browser-free** once you use the right URL. Built `src/providers/anime/anineko.ts`
++ `src/extractors/vibeplayer.ts`, registered + aggregator FIRST.
+- **The trap that cost time:** `/watch/<slug>?ep=N` is the *info* page (episode grid,
+  no player). The **player is `/watch/<slug>/ep-N`** — and IT server-renders all 16
+  `[data-video]` servers in plain HTML. (Found the `/ep-N` pattern via cloakbrowser
+  network-capture on the VM, but production needs NO browser.)
+- Search `GET /browser?keyword=` → `article.nv-anime-card a.nv-anime-thumb` `/watch/<slug>`.
+- Info `GET /watch/<slug>` → `article.nv-info-episode-item a.nv-info-episode-main` → `/watch/<slug>/ep-N`.
+- Player `GET /watch/<slug>/ep-N` → `[data-video]` embeds (HD-1 vibeplayer.site, HD-2
+  bibiemb.xyz, StreamHG otakuhg.site, Earnvids otakuvid.online, Doodstream playmogo.com),
+  in Hard-Sub / Soft-Sub / DUB variants.
+- **SOFT ENGLISH SUBS:** the Soft-Sub/DUB servers carry a separate English `.vtt`
+  **in the `data-video` query** (`?sub=` for vibeplayer/bibiemb, `caption_1=` for
+  otakuhg/otakuvid, `c1_file=` for playmogo) on `cdn.anizara.store`. `_sub_eng` = sub,
+  `_dub_eng` = dub. Fetchable server-side (200, valid WEBVTT). **No extractor needed for subs.**
+- **Video:** wired HD-1 = VibePlayer (`vibeplayer.site/<id>` → m3u8 at
+  `/public/stream/<id>/master.m3u8`, unencrypted, fetchable 200). Other hosts (StreamHG=
+  streamwish-packed, Doodstream, etc.) are TODO fallbacks.
+- Verified e2e on Re:Zero S4 ep1 (simulcast): sub & dub → m3u8 200 (360/720/1080p) + English vtt 200.
 
 ### anikototv.to — MED (also hosts hentai categories)
 - Search `GET /search?keyword=<q>` → 200, `/watch/<slug>` links (browser-free ✅). `/filter?keyword=` also works.
@@ -115,9 +111,16 @@ Built: `src/providers/anime/animenosub.ts` + extractors `megaplay.ts` (had it),
 | Luf-Mp4, Vn-Hls, Uni, Mp4, Ok, Kiwi-Stream | unknown | ? | ❌ investigate |
 
 ## Recommended next target
-**anineko.to** — it's the only candidate with an explicit **Soft Sub** category +
-HD-1/HD-2, i.e. the best shot at *extractable simulcast captions* (the one thing
-the megaplay/back-catalog path can't give us). Plan: reverse `nekovault.js`
-(expect a Nova-style JSON/AES source API) to confirm HD-1/HD-2 = megacloud/megaplay
-and that it returns soft EN `tracks[]`. If yes, it becomes the priority simulcast
-source. reanime.to (single HD-2 server) is the easy second if HD-2 = megaplay.
+**anineko.to is DONE** and is now the primary source (browser-free + soft simulcast
+subs). Remaining candidates, easiest-first:
+- **reanime.to** — single HD-2 server; check if `/watch/<slug>/ep-N` (or similar)
+  server-renders `data-video` like anineko. If HD-2 = vibeplayer/megaplay-style, quick win.
+- **anikototv.to** — browser-free search; check the player URL pattern; VidCloud/Vidstream
+  = megacloud family (may carry soft subs too). Note: also hosts hentai.
+- **mkissa.to** — map the SvelteKit JSON API.
+- **anidb.app / senshi.live** — low value (hard-gated / near-empty).
+
+Lesson from anineko: for these clones, **find the real PLAYER url** (often `/.../ep-N`,
+not `?ep=N`) — the servers are usually server-rendered there as `data-video`, and soft
+subs may ride in the query string. Try plain HTTP on the player URL before assuming a
+browser is needed.
