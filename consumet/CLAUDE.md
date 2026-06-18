@@ -162,3 +162,30 @@ Stop background node procs each session (I do); `docker stop cloak` when idle; c
 
 Still deferred: external captions (Jimaku/OpenSubtitles need keys — see Captions section); harden Gogoanime
 across titles/dub; 3rd source. AnimePahe blocked (JWE/ad gate). Then: redis cache, docker-compose, deploy.
+
+## Session 4–5 update — two new browser-free sources; cloakbrowser now OPTIONAL
+Provider set is now **AniNeko → AnimeNoSub → Gogoanime → AnimeUnity** (aggregator default order).
+Full per-site details live in repo-root **`SOURCES.md`** (the site tracker) and in the Claude memory
+files `animenosub-source.md` + `anineko-source.md`. Highlights:
+
+- **AnimeNoSub** (`src/providers/anime/animenosub.ts`) — fully browser-free (search + episodes +
+  servers all plain HTTP; servers are base64 `<iframe>` in a `<select class="mirror">`). Back-catalog =
+  **megaplay** (soft English subs, +6 langs). Simulcast video = **Nova** (`src/extractors/nova.ts`,
+  AES-128-CBC cracked: key `kiemtienmua911ca`, iv `1234567890oiuytr`) or **Vidmoly** (`vidmoly.ts`,
+  fixed single-quote regex). Moon=Filemoon/Byse skipped (session GraphQL).
+- **AniNeko** (`src/providers/anime/anineko.ts`) — fully browser-free AND the FIRST source with
+  **extractable soft English subtitles for SIMULCASTS** (the long-standing gap). The player is at
+  `/watch/<slug>/ep-N` (NOT `?ep=N` = info page); it server-renders `[data-video]` servers; the
+  Soft-Sub ones attach a separate English `.vtt` in the query string (`?sub=`/`caption_1=`/`c1_file=`
+  on cdn.anizara.store). Video = **VibePlayer** (`src/extractors/vibeplayer.ts`, HD-1, m3u8 at
+  `vibeplayer.site/public/stream/<id>/master.m3u8`).
+
+- **cloakbrowser is now OPTIONAL** — only the Gogoanime fallback needs it. AniNeko + AnimeNoSub are
+  pure HTTP, so the common path runs without a browser. User runs cloakbrowser on their Oracle VM
+  (CDP) only when needed; default `CLOAK_CDP_URL`.
+- **CDN TLS-gate appears LIFTED** for these hosts: megaplay (streamzone1.site), vidmoly (vmeas.cloud),
+  vibeplayer, nova (cf-master) all fetch 200 server-side via plain axios + Referer — master + segments +
+  vtt. So **ViperTLS may be unnecessary** for the AniNeko/AnimeNoSub paths (keep as a fallback; re-test
+  from the Oracle VM IP before ripping it out — see animenosub-source.md caveats).
+- API (`api/`) unchanged: `/search /info /episodes /watch /proxy`. `/watch` should now also surface
+  `subtitles[]` for AniNeko/megaplay (the proxy injects Referer for m3u8/vtt).
