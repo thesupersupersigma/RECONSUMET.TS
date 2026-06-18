@@ -21,6 +21,7 @@ import {
   StreamWish,
   MegaPlay,
   Nova,
+  VibePlayer,
 } from './extractors';
 import {
   IProviderStats,
@@ -119,4 +120,5 @@ export {
   VidMoly,
   MegaPlay,
   Nova,
+  VibePlayer,
 };

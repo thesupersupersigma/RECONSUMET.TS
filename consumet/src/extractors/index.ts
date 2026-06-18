@@ -16,6 +16,7 @@ import StreamLare from './streamlare';
 import StreamSB from './streamsb';
 import StreamTape from './streamtape';
 import StreamWish from './streamwish';
+import VibePlayer from './vibeplayer';
 import VidCloud from './vidcloud';
 import VidMoly from './vidmoly';
 import VizCloud from './vizcloud';
@@ -40,6 +41,7 @@ export {
   StreamSB,
   StreamTape,
   StreamWish,
+  VibePlayer,
   VidCloud,
   VidMoly,
   VizCloud,
