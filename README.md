@@ -2,8 +2,6 @@
   <img src="RECONSUM%CE%A3T-TS.png" alt="RECONSUMΣT.TS" width="640">
 </p>
 
-<h1 align="center">RECONSUMΣT.TS</h1>
-
 <p align="center">
   A <b>self-hostable</b> anime aggregator — a TypeScript scraping library plus a small
   HTTP API with a built-in HLS + subtitle proxy, so streams play in a normal browser.
@@ -15,7 +13,7 @@
 </p>
 
 <p align="center">
-  <b>There is no public hosted instance — you run it yourself.</b>
+  <b>There is no public hosted instance yet.</b>
 </p>
 
 ---
