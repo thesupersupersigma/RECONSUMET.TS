@@ -41,7 +41,7 @@ Built: `src/providers/anime/animenosub.ts` + extractors `megaplay.ts` (had it),
 | anineko.to | soft (200) | hianime-style clone | ✅ all browser-free | HD-1, HD-2, StreamHG, Earnvids, Doodstream | ✅ **DONE** |
 | anikototv.to | soft (200) | zoro/hianime clone on **nekostream** backend | ✅ `/search?keyword=` (browser-free) | HD-1=megaplay (soft EN subs), VidPlay/Vidstream/VidCloud, Kiwi-Stream=vibeplayer | ✅ **DONE** |
 | reanime.to | soft (200) | **SvelteKit** + REST API | ✅ `/api/v1/search?q=` (browser-free) | HD-2 = flixcloud.cc | ✅ **DONE & PLAYABLE** (crack + curl-impersonate proxy; in aggregator) |
-| mkissa.to/anime | soft (200) | **Svelte SPA** | API JSON (path TBD; `/api/search` is 404-JSON so namespace exists) | Luf-Mp4, Fm-Hls, Vn-Hls, Uni, Mp4, Ok | MED |
+| mkissa.to/anime | ⛔ via backend | **SvelteKit SPA = AllAnime frontend** | client calls `api.allanime.day` directly (no server proxy) | AllAnime: Luf-Mp4, Vn-Hls, Uni, Ok… | ⛔ **SKIP** — AllAnime is CF JS-challenge gated (needs a browser) |
 | anidb.app | ⛔ HARD (403 "Just a moment") | unknown (gated) | needs browser | UI only exposes AUDIO eng/jpn; servers hidden | LOW |
 | senshi.live | soft (200) | SPA, "New Website" (near-empty) | none in static HTML | Hard Sub: Server 1, DUB: Server 1 | LOW |
 
@@ -153,11 +153,27 @@ Verified e2e: decrypts to a valid signed `master.m3u8`. The exact pipeline:
   (real server + curl_cffi shim): master/variant playlists 200+deobfuscated, TS segment
   200 (133 KB, `0x47`), `.ass` sub 200.
 
-### mkissa.to — MED (Svelte SPA, the "weird UI")
-- Servers: Luf-Mp4, **Fm-Hls** (Filemoon HLS), Vn-Hls, Uni, Mp4, Ok.
-- SvelteKit → there IS a JSON API (`/api/search` returns 404 *as JSON*); exact data
-  routes need finding (try `__data.json`, `/api/anime/...`, network tab).
-- **Next:** map the SvelteKit API; mostly hardsub hosts (Filemoon etc.) → video, not soft subs.
+### mkissa.to — ⛔ SKIP (it's an AllAnime client-side frontend)
+Recon'd (this session). mkissa.to is a **SvelteKit SPA that is just a skin over AllAnime**
+— the server names (Luf-Mp4, Vn-Hls, Uni, Ok) are AllAnime's, and the bundle's real config
+is `Le = "https://api.allanime.day/api"` (GraphQL: `shows`/`episode`/`sourceUrls`/
+`translationType`), embeds on `allanime.day/embed`, images `cdn.allanime.day`. The
+`allanimenew.com`/`getLinks?id=<fake-hex>` strings in the bundle are **decoys**.
+- **No server-side proxy:** mkissa's SSR pages + `__data.json` are empty shells; the
+  catalog loads **client-side by calling `api.allanime.day` directly**. So scraping mkissa
+  buys nothing over hitting AllAnime itself.
+- **The blocker = AllAnime's Cloudflare gate.** `api.allanime.day` returns a full
+  **"Just a moment" JS/Turnstile challenge** — verified that BOTH plain fetch AND
+  **curl-impersonate (chrome124) get 403**. So it's not a TLS/JA3 gate (our proxy can't fix
+  it); it needs a real browser to solve the JS challenge + a `cf_clearance` cookie
+  (IP/UA-bound, short-lived). NOTE: CF here is partly IP-reputation — ani-cli works from
+  many residential IPs; a datacenter VM (Oracle) likely gets challenged.
+- **Verdict:** not a browser-free source. Skip unless we deliberately want AllAnime via
+  **cloakbrowser** (solve challenge once, harvest `cf_clearance`, replay with matching
+  UA + curl-impersonate TLS). That re-introduces the browser dependency for one source and
+  is fragile — low ROI given we already have 4 working browser-free sources. AllAnime's
+  source-link decode (hex `--`-prefix → XOR 56 → `/apivtwo/clock` → links) is the easy part;
+  the CF gate is the hard part.
 
 ### anidb.app — LOW (hard-gated)
 - Homepage = **403 Cloudflare "Just a moment"** → needs cloakbrowser even to load.
@@ -194,7 +210,8 @@ flixcloud video crack pending — see its section). Remaining candidates, easies
 - **curl-impersonate proxy** (project-wide) — ✅ shipped in `api/src/server.mjs`. Now
   available to harden any other Referer-locked/CF-fronted CDN: just add its host to
   `TLS_IMPERSONATE_HOSTS`. (If the megaplay CDN ever re-gates, this is the fix.)
-- **mkissa.to** — map the SvelteKit JSON API.
+- ~~**mkissa.to**~~ — ⛔ ruled out: it's an AllAnime client-side frontend, and AllAnime is
+  behind a CF JS/Turnstile challenge (curl-impersonate can't pass; needs a browser). See above.
 - **anidb.app / senshi.live** — low value (hard-gated / near-empty).
 
 Lesson from anineko: for these clones, **find the real PLAYER url** (often `/.../ep-N`,
