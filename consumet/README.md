@@ -1,120 +1,79 @@
-<p align="center"><img src="https://consumet.org/images/consumetlogo.png" width="175"/></p>
+# consumet/ — the scraping library
 
-<h1 align="center"> consumet.ts </h1>
+This is the **library half** of [RECONSUMΣT.TS](../README.md): the anime providers,
+video extractors, and the AniList-based aggregator. It's a trimmed fork of
+[`@consumet/extensions`](https://github.com/consumet/extensions) focused on a few
+reliable, mostly browser-free anime sources with real English subtitles.
 
-consumet.ts is a Node library which provides high-level APIs to get information about several entertainment mediums like books, movies, comics, anime, manga, etc.
+> The other half is [`../api/`](../api) — a Fastify service that wraps this library in an
+> HTTP API with a streaming proxy. Most users want the API; see the
+> [root README](../README.md). Use this library directly if you're embedding the scrapers.
 
-<p align="center">
-  <a href="https://www.npmjs.com/package/@consumet/extensions">
-    <img src="https://img.shields.io/npm/v/@consumet/extensions" alt="npm (scoped)">
-  </a>
-  <a href="https://github.com/consumet/consumet.ts/actions/workflows/npm-publish.yml">
-    <img src="https://github.com/consumet/consumet.ts/actions/workflows/npm-publish.yml/badge.svg" alt="npm (scoped)">
-  </a>
-    <a href="https://discord.gg/qTPfvMxzNH">
-    <img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="Prs are welcome">
-  </a>
-    <a href="https://discord.gg/qTPfvMxzNH">
-      <img src="https://img.shields.io/discord/987492554486452315?color=7289da&label=discord&logo=discord&logoColor=7289da" alt="Discord">
-    </a>
-      <a href="https://github.com/consumet/consumet.ts/blob/master/LICENSE">
-    <img src="https://img.shields.io/npm/l/@consumet/extensions" alt="GitHub">
-  </a>
-</p>
+## Build
 
-<h2> Table of Contents </h2>
-
-- [Quick Start](#quick-start)
-  - [Installation](#installation)
-  - [Usage](#usage)
-- [Documentation](#documentation)
-- [Ecosystem](#ecosystem)
-- [Provider Request](#provider-request)
-- [Contributing](#contributing)
-- [Support](#support)
-- [Contributors ✨](#contributors-)
-  - [Credits](#credits)
-- [License](#license)
-
-## Quick Start
-
-### Installation
-
-To use consumet.ts in your project, run:
 ```bash
-yarn add @consumet/extensions
-# or "npm i @consumet/extensions"
+pnpm install
+npx tsc -p tsconfig.json     # emits CommonJS to ./dist
 ```
 
-### Usage
+~12 pre-existing strict-type warnings (in `anilist.ts` / `rabbit.ts`) are expected. A new
+`TS2307` (missing module) is a real error.
 
-**Example** - searching for a book using the libgen provider.
+## Use it directly
+
+### The aggregator (AniList search + cross-provider mapping)
+
 ```ts
-import { BOOKS } from "@consumet/extensions"
+import { AnimeAggregator } from './dist/index.js';
 
-// Create a new instance of the Libgen provider
-const books = new BOOKS.Libgen();
-// Search for a book. In this case, "Pride and Prejudice"
-const data = books.search('pride and prejudice').then(data => {
-  // print results
-  console.log(data)
-})
+const agg = new AnimeAggregator();
+
+const results  = await agg.search('re:zero');          // AniList results (id, title, …)
+const id       = results[0].id;                         // AniList id, e.g. "21355"
+
+const mappings = await agg.getMappings(id);             // which providers have this title
+const eps      = await agg.getEpisodes(id, 'AniNeko');  // { provider, providerId, episodes }
+const source   = await agg.getSources('AniNeko', eps.episodes[0].id, undefined, 'sub');
+// source: { sources: [{ url, quality, isM3U8 }], subtitles: [{ url, lang }], headers, … }
 ```
 
-**Example** - searching for anime using the gogoanime provider.
+The default provider order is
+**AniNeko → AnimeNoSub → AnikotoTV → ReAnime → Gogoanime → AnimeUnity**
+(pass your own array to the `AnimeAggregator` constructor to override).
+
+### A single provider
+
 ```ts
-import { ANIME } from "@consumet/extensions"
+import { ANIME } from './dist/index.js';
 
-// Create a new instance of the Gogoanime provider
-const gogoanime = new ANIME.Gogoanime();
-// Search for an anime. In this case, "One Piece"
-const results = gogoanime.search("One Piece").then(data => {
-  // print results
-  console.log(data);
-})
+const p    = new ANIME.AniNeko();
+const res  = await p.search('re:zero');
+const info = await p.fetchAnimeInfo(res.results[0].id);
+const src  = await p.fetchEpisodeSources(info.episodes[0].id, undefined, 'sub');
 ```
 
-Do you want to know more? Head to the [`Getting Started`](https://github.com/consumet/consumet.ts/tree/master/docs/guides/getting-started.md).
+## What's inside
 
-## Documentation
-- [`Getting Started`](./docs/guides/getting-started.md)
-- [`Guides`](https://github.com/consumet/consumet.ts/tree/master/docs)
-- [`Anime`](./docs/guides/anime.md)
-- [`Manga`](./docs/guides/manga.md)
-- [`Books`](./docs/guides/books.md)
-- [`Movies`](./docs/guides/movies.md)
-- [`Light Novels`](./docs/guides/light-novels.md)
-- [`Comics`](./docs/guides/comics.md)
-- [`Meta`](./docs/guides/meta.md)
-- [`News`](./docs/guides/news.md)
+- **`src/providers/anime/`** — one file per site, each extending `AnimeParser`
+  (`search`, `fetchAnimeInfo`, `fetchEpisodeSources`, `fetchEpisodeServers`).
+- **`src/extractors/`** — one file per video host, extending `VideoExtractor`, returning a
+  normalised `ISource`. Includes some non-trivial reverse-engineering (e.g. `nova.ts`
+  AES-128, `flixcloud.ts` WASM+PBKDF2+AES + playlist-XOR key).
+- **`src/providers/meta/aggregator.ts`** — AniList GraphQL search + title-similarity mapping.
+- **`src/models/`** — shared types (`ISource`, `IAnimeEpisode`, …).
 
-## Ecosystem
-- [Rest-API Reference](https://docs.consumet.org/) - public rest api documentation
-- [Examples](https://github.com/consumet/consumet.ts/tree/master/examples) - examples of using consumet.ts.
-- [Provider Status](https://github.com/consumet/providers-status/blob/main/README.md) - A list of providers and their status.
-- [Changelog](https://github.com/consumet/consumet.ts/blob/master/CHANGELOG.md) - See the latest changes.
-- [Discord Server](https://discord.gg/qTPfvMxzNH) - Join our discord server and chat with the maintainers.
+See [`../SOURCES.md`](../SOURCES.md) for per-source status and recon notes, and
+[`../CONTRIBUTING.md`](../CONTRIBUTING.md) for how to add a source.
 
-## Provider Request
-Make a new [issue](https://github.com/consumet/consumet.ts/issues/new?assignees=&labels=provider+request&template=provider-request.yml) with the name of the provider on the title, as well as a link to the provider in the body paragraph.
+## Streaming caveats
 
-## Contributing
-Check out [contributing guide](https://github.com/consumet/consumet.ts/blob/master/CONTRIBUTING.md) to get an overview of consumet.ts development.
-
-## Support
-You can contact the maintainers of consumet.ts via [email](mailto:consumet.org@gmail.com), or [join the discord server](https://discord.gg/qTPfvMxzNH) (Recommended).
-
-<a href="https://discord.gg/qTPfvMxzNH">
-   <img src="https://discordapp.com/api/guilds/987492554486452315/widget.png?style=banner2">
-</a>
-
-## Contributors ✨
-Thanks to the following people for keeping this project alive and thriving.
-
-[![](https://contrib.rocks/image?repo=consumet/consumet.ts)](https://github.com/consumet/consumet.ts/graphs/contributors)
-
-### Credits
-- [Anify API](https://github.com/Eltik/Anify) - Used as a caching layer for the meta/anilist provider to speed up responses. 
+Sources are HLS (`.m3u8`). Many CDNs are `Referer`-locked; some are Cloudflare/JA3-gated;
+some obfuscate the playlist body. The extractors produce the right URLs (+ `headers.Referer`,
+and a `pk` for obfuscated playlists), but **fetching the stream is the proxy's job** —
+that's what `../api/`'s `/proxy` is for. Don't expect a gated CDN's m3u8 to fetch with plain
+axios.
 
 ## License
-Licensed under [MIT](./LICENSE).
+
+[GPL-3.0](./LICENSE) — inherited from `@consumet/extensions`. Keep the upstream copyright for
+borrowed code.
