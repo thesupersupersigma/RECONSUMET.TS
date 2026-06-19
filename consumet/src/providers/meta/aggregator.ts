@@ -5,6 +5,7 @@ import { compareTwoStrings } from '../../utils/utils';
 import AniNeko from '../anime/anineko';
 import AnimeNoSub from '../anime/animenosub';
 import AnikotoTV from '../anime/anikototv';
+import ReAnime from '../anime/reanime';
 import Gogoanime from '../anime/gogoanime';
 import AnimeUnity from '../anime/animeunity';
 
@@ -42,16 +43,19 @@ class AnimeAggregator {
   private readonly client: AxiosInstance = axios.create({ timeout: 20000 });
   readonly providers: AnimeParser[];
 
-  /** @param providers anime providers to aggregate (default: AniNeko + AnimeNoSub + AnikotoTV + Gogoanime + AnimeUnity) */
+  /** @param providers anime providers to aggregate (default: AniNeko + AnimeNoSub + AnikotoTV + ReAnime + Gogoanime + AnimeUnity) */
   constructor(providers?: AnimeParser[]) {
     // AniNeko first: browser-free AND carries soft English subs for simulcasts.
     // AnimeNoSub second: browser-free, megaplay soft subs on the back-catalog.
     // AnikotoTV third: browser-free (nekostream backend), HD-1 = megaplay soft subs.
+    // ReAnime fourth: browser-free metadata + high-quality .ass subs; video plays
+    //   through the curl-impersonate proxy (flixcloud CDN is CF/JA3-gated).
     // Gogoanime/AnimeUnity are fallbacks.
     this.providers = providers ?? [
       new AniNeko(),
       new AnimeNoSub(),
       new AnikotoTV(),
+      new ReAnime(),
       new Gogoanime(),
       new AnimeUnity(),
     ];

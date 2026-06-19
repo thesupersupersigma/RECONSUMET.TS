@@ -333,6 +333,13 @@ export interface ISource {
   sources: IVideo[];
   download?: string;
   embedURL?: string;
+  /**
+   * Optional base64 key for proxies that must decrypt the HLS *playlist* body
+   * before serving it (e.g. FlixCloud XOR-obfuscates playlists with a per-video
+   * key). The API threads this to `/proxy` as `&pk=` so each playlist response
+   * can be de-obfuscated. Not used for plain providers.
+   */
+  pk?: string;
 }
 
 /**

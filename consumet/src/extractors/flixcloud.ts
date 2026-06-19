@@ -25,11 +25,16 @@ import { USER_AGENT } from '../utils';
  *  5. **AES-256-CBC** decrypt the manifest ciphertext (iv = `ivf_*` field) → the
  *     final signed HLS URL on `fetch5.flixcloud.cc`.
  *
- * The resulting `master.m3u8` is JWT-signed (IP-locked, ~6h TTL). NOTE: the stream
- * CDN (`fetch5.flixcloud.cc`) sits behind a Cloudflare bot-management / TLS
- * (JA3) gate, so the playlist/segments must be fetched by a TLS-impersonating
- * client (the API's stream proxy / ViperTLS), not plain axios. The embed host and
- * the `.ass` subtitle CDN (`*.overcdn.site`) are NOT gated.
+ * The resulting `master.m3u8` is JWT-signed (IP-locked, ~6h TTL). TWO more gates
+ * then apply at playback time, both handled by the API proxy:
+ *  - The stream CDN (`fetch5.flixcloud.cc`) sits behind Cloudflare bot-management
+ *    / TLS (JA3) fingerprinting → fetch with a TLS-impersonating client
+ *    (curl-impersonate) + a full browser header set, not plain axios.
+ *  - Every *playlist* body is XOR-obfuscated with a per-video 32-byte key
+ *    (`window.__pk`, from the WASM `_c()` export). We return it as `pk` so the
+ *    proxy can de-obfuscate each playlist (`plain[i] = b64dec(body)[i] ^ pk[i%32]`).
+ *  Segments are plain. The embed host and the `.ass` sub CDN (`*.overcdn.site`)
+ *  are NOT gated.
  *
  * Subtitles are plain, unencrypted `.ass` files (fansub/Aegisub-grade, styled,
  * e.g. "English (Full Subtitles)"), pulled straight from the payload.
@@ -62,14 +67,19 @@ class FlixCloud extends VideoExtractor {
     };
   }
 
-  /** run the embed's own WASM `_r` cipher over the three fragments → 32-byte E */
+  /**
+   * Run the embed's own WASM over the three fragments. Returns:
+   * - `E`: the 32-byte intermediate from `_r` (feeds PBKDF2 → AES key).
+   * - `pk`: base64 of `_c()`'s 32-byte output — the per-video key the patched
+   *   hls.js exposes as `window.__pk` to XOR-decrypt the obfuscated playlists.
+   */
   private static async runWasmCipher(
     wPayloadB64: string,
     a: Buffer,
     b: Buffer,
     c: Buffer,
     seedInt: number
-  ): Promise<Buffer> {
+  ): Promise<{ E: Buffer; pk: string }> {
     const wasm = await WebAssembly.instantiate(Buffer.from(wPayloadB64, 'base64'), {});
     const exp: any = wasm.instance.exports;
     const mem: WebAssembly.Memory = exp.memory;
@@ -86,7 +96,13 @@ class FlixCloud extends VideoExtractor {
     view.set(c, cPtr);
     exp._s(seedInt);
     exp._r(aPtr, bPtr, cPtr, outPtr, k);
-    return Buffer.from(view.subarray(outPtr, outPtr + k));
+    const E = Buffer.from(view.subarray(outPtr, outPtr + k));
+
+    // `_c()` returns a pointer to its 32-byte output (the playlist key)
+    const pkPtr = exp._c();
+    const pk = Buffer.from(new Uint8Array(mem.buffer).subarray(pkPtr, pkPtr + 32)).toString('base64');
+
+    return { E, pk };
   }
 
   override extract = async (videoUrl: URL): Promise<ISource> => {
@@ -111,6 +127,7 @@ class FlixCloud extends VideoExtractor {
       const seed = html.match(/obfuscation_seed:"([0-9a-f]+)"/)?.[1];
       const wPayload = html.match(/w_payload:"([A-Za-z0-9+/=]+)"/)?.[1];
       let m3u8: string | undefined;
+      let pk: string | undefined;
 
       if (seed && wPayload) {
         const f = FlixCloud.deriveFields(seed);
@@ -130,7 +147,7 @@ class FlixCloud extends VideoExtractor {
           const frag3B64: string | undefined = token?.[tKey];
 
           if (cipherB64 && frag3B64) {
-            const E = await FlixCloud.runWasmCipher(
+            const { E, pk: playlistKey } = await FlixCloud.runWasmCipher(
               wPayload,
               Buffer.from(frag1, 'base64'),
               Buffer.from(keyFrag2, 'base64'),
@@ -145,17 +162,22 @@ class FlixCloud extends VideoExtractor {
               decipher.update(Buffer.from(cipherB64, 'base64')),
               decipher.final(),
             ]).toString('utf8');
-            if (/^https?:\/\/\S+\.m3u8/.test(url)) m3u8 = url.trim();
+            if (/^https?:\/\/\S+\.m3u8/.test(url)) {
+              m3u8 = url.trim();
+              pk = playlistKey; // the playlists at this URL are XOR-obfuscated with __pk
+            }
           }
         }
       }
 
       const result: ISource = {
         // playlist + segments are on a CF/JA3-gated CDN — fetch via the
-        // TLS-impersonating stream proxy, with this Referer.
+        // TLS-impersonating stream proxy, with this Referer. The playlists are
+        // additionally XOR-obfuscated with `pk` (the proxy de-obfuscates them).
         headers: { Referer: 'https://flixcloud.cc/' },
         sources: m3u8 ? [{ url: m3u8, quality: 'auto', isM3U8: true }] : [],
         subtitles,
+        ...(pk ? { pk } : {}),
       };
 
       this.sources = result.sources;

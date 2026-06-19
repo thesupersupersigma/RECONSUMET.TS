@@ -144,21 +144,22 @@ BUILT this session:
   and `/proxy?url=&ref=` (Referer-injecting HLS/vtt proxy + segment streaming + CORS). `/watch` returns
   proxied + raw urls. Run: `cd api && pnpm start` (env PORT, CLOAK_CDP_URL, PUBLIC_URL).
 
-THE BLOCKER (last mile of playback):
-- megaplay's m3u8 lives on a rotating **Cloudflare CDN** (cdn.mewstream.buzz / streamzone1.site / cinewave2.site)
-  that gates on **TLS fingerprint (JA3/JA4)**. Real browser (cloakbrowser) → 200; any server fetch (Node/curl)
-  even with perfect Referer/headers → 403. Validated: there is **NO cf_clearance cookie** (cloakbrowser got 200
-  with zero CDN cookies), so cookie-harvesting is useless — it's the TLS handshake.
-- FIX = **ViperTLS** (github.com/walterwhite-69/ViperTLS, the user's recommendation) — pure-Python JA3/JA4/HTTP2
-  browser impersonation, MIT, runs as a lib OR `vipertls serve` HTTP proxy. Installed in `.venv-tls/`
-  (browser data in `vipertls/`, both gitignored). **VALIDATION PENDING** — `tls-test.local.py` (gitignored)
-  fetches a gated m3u8 via `vipertls.Client(impersonate="chrome_*")`; first call HUNG (likely warming its
-  bundled chromium under low RAM). NEXT: retry the validation with RAM free; if it returns 200 + `#EXTM3U`,
-  wire the proxy to fetch CDN m3u8/segments through ViperTLS (lib call, or route through `vipertls serve` as a
-  sidecar). Then playback works server-side end-to-end.
+THE TLS-FINGERPRINT GATE — SOLVED (curl-impersonate):
+- Some CDNs gate on the **TLS/HTTP2 fingerprint (JA3/JA4)**: reanime/flixcloud's `fetch5.flixcloud.cc`
+  + segment host `*.overcdn.site`, and historically the megaplay CDN family. Real browser → 200; plain
+  Node/axios → `403` "Attention Required", regardless of Referer/headers. No `cf_clearance` cookie is
+  involved — it's purely the handshake (+ the request must be *fetch*-style: `Sec-Fetch-*: cors/empty`,
+  `Origin`, `Accept: */*` — navigation-style headers still 403).
+- FIX (shipped): the `api/` `/proxy` routes hosts in `TLS_IMPERSONATE_HOSTS` (default
+  `flixcloud.cc,overcdn.site`) through **curl-impersonate** (`CURL_IMPERSONATE_BIN`, optional
+  `CURL_IMPERSONATE_ARGS="--impersonate chrome124"`) via a per-request child process: response headers to
+  fd 3, body streamed from stdout, range-aware, child killed on client disconnect. Plain `fetch` for
+  everything else. We dropped **ViperTLS** (sketchy author + it hung); curl-impersonate is lighter (no
+  chromium) and proven. Verified e2e with curl_cffi shim: 200 on the gated CDN + valid MPEG-TS segments.
+- (lwthiker/lexiforest **curl-impersonate** — patched curl w/ BoringSSL; static linux x86_64/aarch64 binaries.)
 
-RAM: user is on an **8GB Mac** → tight. cloakbrowser (Docker Chromium) ~4GB + Node + ViperTLS's chromium.
-Stop background node procs each session (I do); `docker stop cloak` when idle; cap Docker memory ~2GB.
+RAM: user is on an **8GB Mac** → tight, but curl-impersonate adds ~nothing (no browser). cloakbrowser
+(Docker Chromium ~4GB) is only for the Gogoanime fallback; `docker stop cloak` when idle.
 
 Still deferred: external captions (Jimaku/OpenSubtitles need keys — see Captions section); harden Gogoanime
 across titles/dub; 3rd source. AnimePahe blocked (JWE/ad gate). Then: redis cache, docker-compose, deploy.

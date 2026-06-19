@@ -8,8 +8,6 @@ Bootstrap the anime API on a fresh VM. Repo layout: `consumet/` (the scraper lib
 # Node 20+ and pnpm
 curl -fsSL https://fnm.vercel.app/install | bash && exec $SHELL   # or use your distro's node
 npm i -g pnpm
-# Python 3.10–3.14 (for ViperTLS) + venv
-sudo apt-get update && sudo apt-get install -y python3 python3-venv python3-pip
 # Docker is already installed on the VM (used for cloakbrowser)
 ```
 
@@ -32,13 +30,24 @@ cd ..
 cd api && pnpm install && cd ..
 ```
 
-## 4. ViperTLS (TLS-impersonation sidecar, for the CDN Cloudflare gate)
+## 4. curl-impersonate (TLS-impersonation, for the CDN Cloudflare/JA3 gate)
+Some CDNs (reanime's `fetch5.flixcloud.cc` + `*.overcdn.site`) gate on the TLS/HTTP2
+fingerprint — plain Node `fetch` gets a `403` "Attention Required". The `/proxy`
+routes those hosts through **curl-impersonate** so they fetch like a real browser.
 ```bash
-python3 -m venv .venv-tls
-.venv-tls/bin/pip install vipertls
-.venv-tls/bin/vipertls install-browsers
-# (validation of ViperTLS vs the gated m3u8 is still PENDING — see CLAUDE.md)
+# grab a static build for your arch from lexiforest/curl-impersonate releases
+#   (Oracle Ampere = linux-aarch64; x86 VM = linux-x86_64)
+mkdir -p /opt/curl-impersonate && cd /opt/curl-impersonate
+curl -fsSL -o ci.tar.gz \
+  https://github.com/lexiforest/curl-impersonate/releases/latest/download/curl-impersonate-linux-aarch64.tar.gz
+tar xf ci.tar.gz && cd -
+# quick check: should print 200 on a normal site
+/opt/curl-impersonate/curl-impersonate --impersonate chrome124 -s -o /dev/null -w '%{http_code}\n' https://example.com
 ```
+The API auto-uses it when `CURL_IMPERSONATE_BIN` is set (see step 6). Prefer the
+single-binary `--impersonate` build so per-request headers override the profile
+defaults cleanly. (A `pip install curl_cffi` + tiny wrapper works too if you'd
+rather not manage a binary.)
 
 ## 5. cloakbrowser (stealth browser for the episode-list step)
 ```bash
@@ -53,8 +62,11 @@ cd api
 PORT=3000 \
 CLOAK_CDP_URL=http://localhost:9222 \
 PUBLIC_URL=https://api.thesupersuperanime.lol \
+CURL_IMPERSONATE_BIN=/opt/curl-impersonate/curl-impersonate \
+CURL_IMPERSONATE_ARGS="--impersonate chrome124" \
 pnpm start
-# health: curl http://localhost:3000/
+# health: curl http://localhost:3000/   (look for tlsImpersonation.enabled=true)
+# TLS_IMPERSONATE_HOSTS defaults to "flixcloud.cc,overcdn.site"; add more if needed.
 ```
 
 ## 7. Expose at api.thesupersuperanime.lol (Cloudflare Tunnel — no open ports, hides VM IP)
@@ -82,8 +94,9 @@ cloudflared tunnel run anime-api    # (run as a systemd service for persistence)
 - `GET /proxy?url=<enc>&ref=<enc>`  — HLS/subtitle proxy
 
 ## Notes / next steps
-- **Pending:** validate ViperTLS fetches the gated megaplay m3u8, then wire `/proxy` to fetch the
-  CDN through it (see CLAUDE.md "the TLS-fingerprint blocker"). This is the last mile for playback.
+- **TLS gate: SOLVED** via curl-impersonate (step 4). Verified e2e on reanime/flixcloud:
+  decrypt m3u8 → impersonated fetch (200) → XOR-deobfuscate playlists → stream TS segments +
+  `.ass` subs. Set `CURL_IMPERSONATE_BIN` and it just works; without it those hosts 403.
 - Gate the public API (API key / referer-allowlist) + add Redis caching before heavy use.
 - Keep Docker memory bounded; `docker stop cloak` when idle.
 - Run cloakbrowser + cloudflared + the API as systemd services (or docker-compose) for durability.

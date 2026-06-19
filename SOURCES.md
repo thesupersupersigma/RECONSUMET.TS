@@ -40,7 +40,7 @@ Built: `src/providers/anime/animenosub.ts` + extractors `megaplay.ts` (had it),
 |---|---|---|---|---|---|
 | anineko.to | soft (200) | hianime-style clone | ✅ all browser-free | HD-1, HD-2, StreamHG, Earnvids, Doodstream | ✅ **DONE** |
 | anikototv.to | soft (200) | zoro/hianime clone on **nekostream** backend | ✅ `/search?keyword=` (browser-free) | HD-1=megaplay (soft EN subs), VidPlay/Vidstream/VidCloud, Kiwi-Stream=vibeplayer | ✅ **DONE** |
-| reanime.to | soft (200) | **SvelteKit** + REST API | ✅ `/api/v1/search?q=` (browser-free) | HD-2 = flixcloud.cc | ✅ **crack DONE**; stream CDN is CF/JA3-gated (needs TLS-impersonating proxy) |
+| reanime.to | soft (200) | **SvelteKit** + REST API | ✅ `/api/v1/search?q=` (browser-free) | HD-2 = flixcloud.cc | ✅ **DONE & PLAYABLE** (crack + curl-impersonate proxy; in aggregator) |
 | mkissa.to/anime | soft (200) | **Svelte SPA** | API JSON (path TBD; `/api/search` is 404-JSON so namespace exists) | Luf-Mp4, Fm-Hls, Vn-Hls, Uni, Mp4, Ok | MED |
 | anidb.app | ⛔ HARD (403 "Just a moment") | unknown (gated) | needs browser | UI only exposes AUDIO eng/jpn; servers hidden | LOW |
 | senshi.live | soft (200) | SPA, "New Website" (near-empty) | none in static HTML | Hard Sub: Server 1, DUB: Server 1 | LOW |
@@ -133,18 +133,25 @@ Verified e2e: decrypts to a valid signed `master.m3u8`. The exact pipeline:
    `seed[i%len]` → SHA-256 → AES-256 key.
 5. **AES-256-CBC** decrypt `v` (iv = `ivf_*` value) → final URL on `fetch5.flixcloud.cc`.
 
-**The one remaining blocker = the stream CDN, not crypto.** The decrypted
-`fetch5.flixcloud.cc/_v7/<id>/master.m3u8?token=<JWT>` is JWT-signed (IP-locked, ~6h)
-**and behind Cloudflare bot-management / TLS (JA3) fingerprinting** → plain
-node/axios get a `403` managed-challenge regardless of headers. (The embed host
-`flixcloud.cc` and the `.ass` sub CDN `*.overcdn.site` are NOT gated — only the
-stream subdomain.) To actually play it the **stream proxy must use a
-TLS-impersonating client** (curl-impersonate / `cycletls`/`tls-client` / ViperTLS),
-or route the fetch through cloakbrowser. The current `api/src/server.mjs` `/proxy`
-uses plain `fetch` → will 403 on this CDN.
-- **Status:** `ReAnime` is kept OUT of the aggregator default chain until the proxy
-  can fetch this CDN. The extractor returns the correct m3u8 + the `.ass` subs today.
-  When the proxy gains TLS-impersonation, add `ReAnime` to `meta/aggregator.ts`.
+**Two more playback-time gates — both SOLVED in the `/proxy`:**
+1. **CF/JA3 TLS gate.** `fetch5.flixcloud.cc/_v7/<id>/master.m3u8?token=<JWT>` (JWT
+   IP-locked ~6h) **and the segment host `*.overcdn.site`** (segments are disguised as
+   `.ttf`, first byte `0x47` = MPEG-TS) both 403 plain node. Beaten with
+   **curl-impersonate** + a *fetch*-style header set (`Sec-Fetch-*: cors/empty`,
+   `Origin`, `Accept: */*` — navigation-style headers alone still 403, that was the
+   gotcha). NOTE: the embed host `flixcloud.cc` and the **subtitle** path on overcdn are
+   not gated, but the **segment** path on overcdn IS → impersonate `overcdn.site` too.
+2. **Playlist XOR obfuscation.** Each playlist body comes back base64 (NOT `#EXTM3U`),
+   XOR'd with a **per-video 32-byte key** = `window.__pk` (the WASM `_c()` export):
+   `plain[i] = b64dec(body)[i] ^ pk[i%32]`. The patched hls.js does this in-browser; we
+   replicate it in the proxy. The extractor returns `pk` (ISource.pk); `/watch` threads
+   it as `&pk=` and `rewriteM3U8` propagates it to child playlists.
+- **Status: PLAYABLE end-to-end.** `flixcloud.ts` returns m3u8 + `pk` + `.ass` subs;
+  `api/src/server.mjs` `/proxy` impersonates `TLS_IMPERSONATE_HOSTS`
+  (`flixcloud.cc,overcdn.site`) via `CURL_IMPERSONATE_BIN` and de-obfuscates playlists.
+  `ReAnime` is now in the aggregator default chain (after AnikotoTV). Verified e2e
+  (real server + curl_cffi shim): master/variant playlists 200+deobfuscated, TS segment
+  200 (133 KB, `0x47`), `.ass` sub 200.
 
 ### mkissa.to — MED (Svelte SPA, the "weird UI")
 - Servers: Luf-Mp4, **Fm-Hls** (Filemoon HLS), Vn-Hls, Uni, Mp4, Ok.
@@ -182,12 +189,11 @@ uses plain `fetch` → will 403 on this CDN.
 **anineko.to is DONE** and is now the primary source (browser-free + soft simulcast
 subs). **reanime.to is PARTIAL** (browser-free API + free `.ass` soft subs built;
 flixcloud video crack pending — see its section). Remaining candidates, easiest-first:
-- **reanime.to flixcloud crack** — ✅ DONE (decryption fully implemented). The only
-  remaining work is **TLS-impersonation in the stream proxy** so the CF/JA3-gated
-  `fetch5.flixcloud.cc` CDN can be fetched — then flip ReAnime into the aggregator.
-- **TLS-impersonating proxy** (project-wide) — would unlock reanime's video AND
-  harden every Referer-locked/CF-fronted CDN. Options: curl-impersonate binary,
-  `cycletls`/`node-tls-client`, ViperTLS, or proxy gated fetches via cloakbrowser.
+- **reanime.to flixcloud** — ✅ DONE & PLAYABLE (decryption + curl-impersonate proxy +
+  playlist XOR deobfuscation; in the aggregator). Nothing left here.
+- **curl-impersonate proxy** (project-wide) — ✅ shipped in `api/src/server.mjs`. Now
+  available to harden any other Referer-locked/CF-fronted CDN: just add its host to
+  `TLS_IMPERSONATE_HOSTS`. (If the megaplay CDN ever re-gates, this is the fix.)
 - **mkissa.to** — map the SvelteKit JSON API.
 - **anidb.app / senshi.live** — low value (hard-gated / near-empty).
 
