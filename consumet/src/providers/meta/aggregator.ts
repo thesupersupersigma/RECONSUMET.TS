@@ -36,6 +36,7 @@ interface AniMeta {
   format?: string; // TV, TV_SHORT, MOVIE, OVA, ONA, SPECIAL
   status?: string; // RELEASING means the count is unreliable (ongoing)
   seasonNumber?: number; // sequel ORDINAL parsed from titles/synonyms; undefined if no marker
+  part?: number; // split-cour part/cour number (AniList splits these; providers often don't)
 }
 
 // --- season-disambiguation tuning (see the heuristic block above bestMatch/rankedMatches) ---
@@ -43,6 +44,8 @@ const TITLE_FLOOR = 0.5; // a candidate must clear this on title alone — metad
 const MAX_CANDIDATES = 3; // top-N kept per provider for Tier-2 verification
 const SEASON_BONUS = 0.15;
 const SEASON_PENALTY = 0.3;
+const PART_BONUS = 0.1; // split-cour ("Part 2"/"Cour 2") — secondary to the season ordinal
+const PART_PENALTY = 0.2;
 const YEAR_BONUS = 0.1;
 const YEAR_PENALTY = 0.15;
 const FORMAT_PENALTY = 0.4; // a TV season mapped onto the movie/OVA, or vice-versa
@@ -59,6 +62,8 @@ const WORD_ORDINAL: Record<string, number> = { second: 2, third: 3, fourth: 4, f
  * marker is present — i.e. a plain S1 title ("Kaguya-sama wa Kokurasetai") or a named sequel
  * with no number ("Ultra Romantic"). We deliberately only treat numbers tied to a season token
  * as ordinals, so names like "86", "Steins;Gate 0" or "Mob Psycho 100" aren't misread.
+ * NOTE: "Part"/"Cour" are handled by {@link detectPart}, NOT here — so "Final Season Part 2"
+ * isn't mistaken for "Season 2" and AniList's split cours map to the right half.
  */
 export const detectSeasonNumber = (text: string): number | undefined => {
   if (!text) return undefined;
@@ -68,10 +73,10 @@ export const detectSeasonNumber = (text: string): number | undefined => {
     if (n >= 2 && n <= 12 && (best === undefined || n > best)) best = n;
   };
   let m: RegExpExecArray | null;
-  // "2nd season", "3rd cour", "2 part", "season 2", "cour-3", "part_2"
-  const reNumThenWord = /(\d{1,2})(?:st|nd|rd|th)?\s*[-_ ]?\s*(?:season|cour|part)\b/g;
+  // "2nd season", "season 2", "season-3", "season_2"
+  const reNumThenWord = /(\d{1,2})(?:st|nd|rd|th)?\s*[-_ ]?\s*season\b/g;
   while ((m = reNumThenWord.exec(s))) take(Number(m[1]));
-  const reWordThenNum = /\b(?:season|cour|part)\s*[-_ ]?\s*(\d{1,2})\b/g;
+  const reWordThenNum = /\bseason\s*[-_ ]?\s*(\d{1,2})\b/g;
   while ((m = reWordThenNum.exec(s))) take(Number(m[1]));
   // written ordinals: "second season"
   const reWord = /\b(second|third|fourth|fifth)\s+season\b/g;
@@ -82,6 +87,27 @@ export const detectSeasonNumber = (text: string): number | undefined => {
   // standalone trailing roman numeral token: "... II", "...-iii"
   const reRoman = /(?:^|[\s:_-])(ii|iii|iv)(?=$|[\s:_-])/g;
   while ((m = reRoman.exec(s))) take(ROMAN[m[1]]);
+  return best;
+};
+
+/**
+ * Detect a "Part"/"Cour" number — a sub-division of ONE season. AniList splits these into
+ * separate media entries (e.g. Re:Zero "Season 2" vs "Season 2 Part 2"); many providers don't.
+ * Kept separate from the season ordinal so the two halves of a cour-split season match correctly.
+ * Returns undefined when absent. `part 1` is meaningful here (unlike season, where 1 = unmarked).
+ */
+export const detectPart = (text: string): number | undefined => {
+  if (!text) return undefined;
+  const s = text.toLowerCase();
+  let best: number | undefined;
+  const take = (n: number) => {
+    if (n >= 1 && n <= 6 && (best === undefined || n > best)) best = n;
+  };
+  let m: RegExpExecArray | null;
+  const reWordThenNum = /\b(?:part|cour)\s*[-_ ]?\s*(\d{1,2})\b/g;
+  while ((m = reWordThenNum.exec(s))) take(Number(m[1]));
+  const reNumThenWord = /(\d{1,2})(?:st|nd|rd|th)?\s*[-_ ]?\s*(?:part|cour)\b/g;
+  while ((m = reNumThenWord.exec(s))) take(Number(m[1]));
   return best;
 };
 
@@ -167,16 +193,16 @@ class AnimeAggregator {
     const { data } = await this.client.post(ANILIST_GRAPHQL, { query: gql, variables: { id: Number(anilistId) } });
     const m = data?.data?.Media ?? {};
     const titles: string[] = [m.title?.english, m.title?.romaji, m.title?.native, ...(m.synonyms ?? [])].filter(Boolean);
-    const seasonNumber = titles
-      .map(detectSeasonNumber)
-      .reduce<number | undefined>((mx, n) => (n != null && (mx == null || n > mx) ? n : mx), undefined);
+    const maxOf = (fn: (t: string) => number | undefined) =>
+      titles.map(fn).reduce<number | undefined>((mx, n) => (n != null && (mx == null || n > mx) ? n : mx), undefined);
     return {
       titles,
       episodes: m.episodes ?? undefined,
       year: m.seasonYear ?? m.startDate?.year ?? undefined,
       format: m.format ?? undefined,
       status: m.status ?? undefined,
-      seasonNumber,
+      seasonNumber: maxOf(detectSeasonNumber),
+      part: maxOf(detectPart),
     };
   };
 
@@ -187,6 +213,10 @@ class AnimeAggregator {
     const aniS = meta.seasonNumber;
     const resS = detectSeasonNumber(title) ?? detectSeasonNumber(slug);
     if (aniS != null && resS != null) adj += aniS === resS ? SEASON_BONUS : -SEASON_PENALTY;
+
+    const aniP = meta.part;
+    const resP = detectPart(title) ?? detectPart(slug);
+    if (aniP != null && resP != null) adj += aniP === resP ? PART_BONUS : -PART_PENALTY;
 
     const aniY = meta.year;
     const resY = detectYear(title) ?? detectYear(slug);
@@ -254,6 +284,10 @@ class AnimeAggregator {
     const candOrdinal = detectSeasonNumber(candidate.title) ?? detectSeasonNumber(String(candidate.id));
     const ordinalDecided = meta.seasonNumber != null && candOrdinal != null;
     if (ordinalDecided && candOrdinal !== meta.seasonNumber) return false;
+
+    // explicit split-cour contradiction — both sides name a part/cour and they differ
+    const candPart = detectPart(candidate.title) ?? detectPart(String(candidate.id));
+    if (meta.part != null && candPart != null && candPart !== meta.part) return false;
 
     // 3) episode-count backstop — only when the ordinal couldn't decide, the show is finished,
     //    and AniList gives a count. Tolerant (recaps/specials drift). Never reject ongoing shows.
