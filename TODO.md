@@ -24,8 +24,13 @@ filters. The plan below reflects this.
 
 ---
 
-## 1. ROOT-CAUSE: season disambiguation — TWO-TIER (recall → verify)  ← do this first, alone
-**File:** `consumet/src/providers/meta/aggregator.ts` (+ a one-line surface in `reanime.ts`)
+## 1. ROOT-CAUSE: season disambiguation — TWO-TIER (recall → verify)  ✅ DONE (commits 3281002, 6e6ef81)
+**File:** `consumet/src/providers/meta/aggregator.ts` (+ `reanime.ts` alID surface, `types.ts` alID field)
+> Implemented + validated live on `sznVerifier`. Added a **part/cour dimension** beyond the plan
+> (`detectPart`) after Re:Zero testing showed AniList splits seasons into Part-1/Part-2 entries
+> the season ordinal alone couldn't tell apart (also fixed a latent "Part 2 == Season 2" bug).
+> Validated: Kaguya S1/S2/S3, Re:Zero S1/S2-cour1/S2-Part2/S4(airing), Bocchi (single-season).
+> Each AniList id maps to a distinct, count-correct slug; wrong/missing seasons fall through.
 
 **Why:** `bestMatch` (`:97-108`) maps an AniList id → provider slug by **pure title
 similarity** (`compareTwoStrings`, keep highest ≥ 0.5). Multi-season shows have near-identical
@@ -201,10 +206,23 @@ but worth doing so they can't silently fail if wired up later.
   - `/watch` — `provider` + `episodeId` required (already 400s; keep); validate `type` ∈
     {`sub`,`dub`} (default `sub`).
   - `/proxy` — `url` required (already 400s; keep); reject non-`http(s)` targets.
-- **Per-IP rate limiter** — in-memory token bucket keyed by IP. Configurable via env
-  (e.g. `RATE_LIMIT_PER_MIN`, sane default like 120/min; `0` = disabled). Return `429` with a
-  clean JSON body when exceeded. (Use `@fastify/rate-limit` only if already a dep; otherwise a
-  tiny hand-rolled bucket to avoid adding deps.)
+- **Per-IP rate limiter — TIERED by route cost** (not one flat limit). Keyed by IP, returns
+  `429` + clean JSON. Tiers reflect *our* routes' real cost (live scraping, not cached):
+  | route(s) | cost | env (default/min) |
+  |---|---|---|
+  | `/search` | AniList GraphQL only — cheap | `RATE_LIMIT_MAX` (120) |
+  | `/info`, `/episodes` | live provider scraping (CF-prone) | `RATE_LIMIT_SCRAPE` (60) |
+  | `/watch` | extractor decrypt + proxy setup + proxy bw | `RATE_LIMIT_WATCH` (30) |
+  | `/proxy` | **HLS segments — hundreds per stream** | `RATE_LIMIT_PROXY` (600) or exempt |
+  | `/` | trivial health | exempt |
+  - ⚠️ **`/proxy` must NOT get a normal limit** — one video fires hundreds of segment requests in
+    minutes; a 30–120/min cap would break playback. High default or exempt.
+  - `0` on any var = that tier disabled. `RATE_LIMIT_WINDOW` (default 60s).
+  - **Trust the proxy header** (`RATE_LIMIT_TRUST_PROXY`, default on) — behind Cloudflare and for
+    SSR frontends every user shares the frontend server's IP; rate-limit on `X-Forwarded-For`, not
+    the socket IP, or one frontend = one bucket for everyone. (Set Fastify `trustProxy`.)
+  - **Bypass loopback/private IPs** so an internal sync worker isn't throttled.
+  - Hand-rolled in-memory bucket (no new dep) unless `@fastify/rate-limit` is already present.
 - **CORS** — `origin: '*'` (`server.mjs:35`) is intentional for an exposed read-only API.
   Leave a one-line comment saying so.
 - **Optional API-key gate** — env-driven, **OFF by default** (`API_KEY` unset → no gate), so
@@ -256,11 +274,9 @@ but worth doing so they can't silently fail if wired up later.
   id from `fetchAnimeInfo` (1a) so Tier 2 can verify it; no other provider behavior changes.
 - No new heavy deps.
 
-## Open questions for your review
-- **Rate-limit default**: 120 req/min/IP OK, or different?
-- **API-key gate**: include the (off-by-default) scaffold now, or skip until you actually
-  expose it?
-- **Tier-1/Tier-2 constants** (`N=3` candidates, `EPISODE_COUNT_TOLERANCE=±2`, the bonus/penalty
-  set in 1d) are starting values — fine to tune during the 1e verify step if a real case needs it?
-- **ReAnime exact-id bridge**: OK to add the one-line change surfacing its resolved AniList id
-  from `fetchAnimeInfo` so Tier 2 can do an exact match? (Confirmed it already reads it.)
+## Decisions (resolved)
+- **Rate limit**: ✅ tiered, env-configurable, base `RATE_LIMIT_MAX=120` (see item 3 table).
+- **API-key gate**: ✅ scaffold the middleware now, **disabled by default** (easier to wire while
+  routes are being hardened than to retrofit later).
+- **Tier-1/Tier-2 constants**: ✅ tune freely during verification (done for item 1).
+- **ReAnime exact-id bridge**: ✅ implemented (`info.alID`).
