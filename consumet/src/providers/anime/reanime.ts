@@ -117,6 +117,8 @@ class ReAnime extends AnimeParser {
 
       const anilistId = String(anime.anilist ?? '') || this.anilistIdFrom(JSON.stringify(anime));
       if (!anilistId) throw new Error('could not resolve AniList id for flix lookup');
+      // surface the resolved AniList id so the aggregator can verify this mapping by exact id
+      animeInfo.alID = anilistId;
 
       const { data: eps } = await this.client.get(
         `${this.baseUrl}/api/v1/anime/${slug}/episodes?limit=2000`,

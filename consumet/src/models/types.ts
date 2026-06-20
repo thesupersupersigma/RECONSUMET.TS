@@ -72,6 +72,9 @@ export enum MediaFormat {
 
 export interface IAnimeInfo extends IAnimeResult {
   malId?: number | string;
+  /** AniList media id, when a provider exposes/resolves it (e.g. ReAnime). Lets the
+   *  aggregator verify a title-matched mapping by exact id instead of fuzzy similarity. */
+  alID?: number | string;
   genres?: string[];
   description?: string;
   status?: MediaStatus;
