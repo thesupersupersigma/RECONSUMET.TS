@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Self-host HTTP API over the anime aggregator (rebrand me before going public)",
+  "description": "Self-hosted HTTP API over the anime aggregator (AniList search/mapping + HLS proxy).",
   "scripts": {
     "start": "node src/server.mjs"
   },
