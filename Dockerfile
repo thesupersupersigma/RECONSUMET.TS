@@ -9,11 +9,11 @@ COPY consumet/ ./consumet/
 WORKDIR /app/consumet
 RUN pnpm install --ignore-scripts && npx tsc || true
 
-# Install and set up API
+# Install API
 WORKDIR /app
 COPY api/ ./api/
 WORKDIR /app/api
-RUN pnpm install --ignore-scripts && npx tsc || true
+RUN pnpm install --ignore-scripts
 
 WORKDIR /app
 EXPOSE 4001
