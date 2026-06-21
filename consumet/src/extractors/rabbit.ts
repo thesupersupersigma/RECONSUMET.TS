@@ -1,3 +1,10 @@
+// ⚠️ MOST FRAGILE FILE IN THE REPO — DO NOT debug surgically.
+// This is a hand-transcribed mirror of rabbitstream/vidcloud's obfuscated WASM key-derivation
+// bundle: the embedded PNG byte array below + the WASM loader reproduce their decrypt routine
+// exactly. When rabbitstream rotates its bundle (it does, without notice), this breaks wholesale
+// and selector/offset tweaks will NOT fix it. ROTATE-AND-REPLACE: re-capture their current bundle
+// and regenerate this file end-to-end. (Currently not on any active provider's path — kept for
+// reference / potential FlixHQ-style reuse.)
 import CryptoJS from 'crypto-js';
 const embed_url = 'https://rabbitstream.net/v2/embed-4/';
 const referrer = 'https://flixhq.to/';

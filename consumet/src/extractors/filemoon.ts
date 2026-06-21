@@ -13,23 +13,11 @@ class Filemoon extends VideoExtractor {
 
   private readonly host = 'https://filemoon.sx';
 
-  override extract = async (videoUrl: URL): Promise<IVideo[]> => {
-    const options = {
-      headers: {
-        Referer: videoUrl.href,
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'User-Agent': USER_AGENT,
-        'X-Requested-With': 'XMLHttpRequest',
-      },
-    };
-
-    const { data } = await this.client.get(videoUrl.href);
-
-    const s = data.substring(data.indexOf('eval(function') + 5, data.lastIndexOf(')))'));
-    try {
-      const newScript = 'function run(' + s.split('function(')[1] + '))';
-    } catch (err) {}
-    return this.sources;
+  override extract = async (_videoUrl: URL): Promise<IVideo[]> => {
+    // NON-FUNCTIONAL: the packed-eval unpacker was never finished — it built `newScript` then
+    // discarded it and returned an empty source list. Fail loudly instead of silently yielding
+    // no sources. Not reachable from any active provider (see TODO.md item 2 / extractors audit).
+    throw new Error('Filemoon extractor not implemented');
   };
 }
 

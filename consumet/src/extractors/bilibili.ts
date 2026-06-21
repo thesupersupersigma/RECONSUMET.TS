@@ -5,15 +5,11 @@ class BilibiliExtractor extends VideoExtractor {
   protected override serverName = 'Bilibili';
   protected override sources: IVideo[] = [];
 
-  override async extract(episodeId: any): Promise<ISource> {
-    this.sources.push({
-      url: `https://api.consumet.org/utils/bilibili/playurl?episode_id=${episodeId}`,
-      isM3U8: false,
-      isDASH: true,
-    });
-    return {
-      sources: this.sources,
-    };
+  override async extract(_episodeId: any): Promise<ISource> {
+    // DEAD: this pointed at api.consumet.org (shut down), so it could only ever yield a URL that
+    // 404s. Fail loudly so it can't silently no-op in a pipeline. Not reachable from any active
+    // provider (see TODO.md item 2 / extractors audit).
+    throw new Error('Bilibili extractor unsupported (api.consumet.org is dead)');
   }
 
   toDash = (data: any) => {
