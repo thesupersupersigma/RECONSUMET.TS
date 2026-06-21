@@ -40,7 +40,7 @@ interface AniMeta {
 }
 
 // --- season-disambiguation tuning (see the heuristic block above bestMatch/rankedMatches) ---
-const TITLE_FLOOR = 0.5; // a candidate must clear this on title alone — metadata never rescues a bad title
+const TITLE_FLOOR = 0.35; // a candidate must clear this on title alone — metadata never rescues a bad title
 const MAX_CANDIDATES = 3; // top-N kept per provider for Tier-2 verification
 const SEASON_BONUS = 0.15;
 const SEASON_PENALTY = 0.3;

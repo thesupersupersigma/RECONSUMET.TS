@@ -186,6 +186,9 @@ app.get('/watch', { preHandler: apiGuard('watch') }, async (req, reply) => {
     agg.getSources(provider, episodeId, undefined, 'dub'),
   ]);
 
+  if (subRes.status === 'rejected') app.log.warn({ provider: req.query.provider, err: subRes.reason?.message }, 'sub getSources failed');
+  if (dubRes.status === 'rejected') app.log.warn({ provider: req.query.provider, err: dubRes.reason?.message }, 'dub getSources failed');
+
   const sub = subRes.status === 'fulfilled' ? shape(subRes.value) : null;
   const dub = dubRes.status === 'fulfilled' ? shape(dubRes.value) : null;
 
