@@ -7,13 +7,13 @@ WORKDIR /app
 # Build consumet library first
 COPY consumet/ ./consumet/
 WORKDIR /app/consumet
-RUN pnpm install --ignore-scripts && npx tsc
+RUN pnpm install --ignore-scripts && npx tsc --noEmitOnError false
 
 # Install and set up API
 WORKDIR /app
 COPY api/ ./api/
 WORKDIR /app/api
-RUN pnpm install --ignore-scripts
+RUN pnpm install --ignore-scripts && npx tsc --noEmitOnError false
 
 WORKDIR /app
 EXPOSE 4001
