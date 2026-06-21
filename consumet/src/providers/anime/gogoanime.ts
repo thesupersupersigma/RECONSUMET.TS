@@ -92,9 +92,9 @@ class Gogoanime extends AnimeParser {
 
     try {
       const data = await this.browser.withPage(async page => {
-        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: Number(process.env.BROWSER_NAV_TIMEOUT_MS) || 60000 });
         await page
-          .waitForSelector('#episode_related > li a', { timeout: 25000 })
+          .waitForSelector('#episode_related > li a', { timeout: Number(process.env.BROWSER_WAIT_TIMEOUT_MS) || 25000 })
           .catch(() => {});
 
         const meta = await page.evaluate(() => ({

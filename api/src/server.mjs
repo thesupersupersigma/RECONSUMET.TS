@@ -11,6 +11,8 @@
 //   RATE_LIMIT_TRUST_PROXY trust X-Forwarded-For for client IP (default true; needed behind CF / SSR frontends)
 //   API_KEY                if set, /search /info /episodes /watch require it (x-api-key or Bearer). OFF by default.
 //   DEBUG_INFO             if "1"/"true", the / route also exposes cloakbrowser/TLS diagnostics (off by default)
+//   PROXY_TIMEOUT_MS       upstream timeout for /proxy fetch + curl-impersonate (ms, default 30000)
+//   HTTP_TIMEOUT_MS        (consumet lib) AniList/provider axios timeout (ms, default 20000)
 //   CLOAK_CDP_URL          cloakbrowser CDP endpoint (default http://localhost:9222) — needed for
 //                          Gogoanime episode lists. Search/info/sources work without it.
 //   PUBLIC_URL             public base url used when building proxy links (default derived from request)
@@ -50,6 +52,7 @@ const RL_TIERS = {
 };
 const API_KEY = process.env.API_KEY || ''; // OFF by default — set to require auth on data routes
 const DEBUG_INFO = /^(1|true)$/i.test(process.env.DEBUG_INFO || '');
+const PROXY_TIMEOUT_MS = Number(process.env.PROXY_TIMEOUT_MS) || 30000; // /proxy upstream fetch + curl max-time
 
 // trustProxy: behind Cloudflare / an SSR frontend the socket IP is the proxy's; trust
 // X-Forwarded-For so rate limiting keys on the real client IP (toggle via RATE_LIMIT_TRUST_PROXY).
@@ -219,7 +222,7 @@ const impersonatedFetch = (target, { referer, range }) =>
       ...(referer ? { Referer: referer } : {}),
       ...(range ? { Range: range } : {}),
     };
-    const args = [...CURL_ARGS, '-sS', '-N', '--max-time', '30', '-D', '/dev/fd/3'];
+    const args = [...CURL_ARGS, '-sS', '-N', '--max-time', String(Math.ceil(PROXY_TIMEOUT_MS / 1000)), '-D', '/dev/fd/3'];
     for (const [k, v] of Object.entries(hdrs)) args.push('-H', `${k}: ${v}`);
     args.push(target);
 
@@ -265,7 +268,7 @@ const proxiedUpstream = async (target, { referer, range }) => {
   const headers = { 'User-Agent': UA };
   if (referer) headers.Referer = referer;
   if (range) headers.Range = range;
-  const r = await fetch(target, { headers, signal: AbortSignal.timeout(30000) });
+  const r = await fetch(target, { headers, signal: AbortSignal.timeout(PROXY_TIMEOUT_MS) });
   return {
     status: r.status,
     getHeader: name => r.headers.get(name),
@@ -304,19 +307,31 @@ app.get('/search', { preHandler: apiGuard('default') }, async (req, reply) => {
   if (!q) return reply.code(400).send({ error: "missing or empty 'q' query param" });
   const page = Number(req.query.page) || 1;
   if (page < 1) return reply.code(400).send({ error: "'page' must be >= 1" });
-  return { results: await agg.search(q, page) };
+  try {
+    return { results: await agg.search(q, page) };
+  } catch (e) {
+    return reply.code(502).send({ error: `search upstream failed: ${e.message}` });
+  }
 });
 
 app.get('/info/:anilistId', { preHandler: apiGuard('scrape') }, async (req, reply) => {
   if (!isNumericId(req.params.anilistId))
     return reply.code(400).send({ error: 'anilistId must be numeric' });
-  return { id: req.params.anilistId, mappings: await agg.getMappings(req.params.anilistId) };
+  try {
+    return { id: req.params.anilistId, mappings: await agg.getMappings(req.params.anilistId) };
+  } catch (e) {
+    return reply.code(502).send({ error: `mapping upstream failed: ${e.message}` });
+  }
 });
 
 app.get('/episodes/:anilistId', { preHandler: apiGuard('scrape') }, async (req, reply) => {
   if (!isNumericId(req.params.anilistId))
     return reply.code(400).send({ error: 'anilistId must be numeric' });
-  return agg.getEpisodes(req.params.anilistId, req.query.provider);
+  try {
+    return await agg.getEpisodes(req.params.anilistId, req.query.provider);
+  } catch (e) {
+    return reply.code(502).send({ error: `episodes upstream failed: ${e.message}` });
+  }
 });
 
 // sources, with m3u8 + subtitle urls pre-wrapped through the proxy (ready for hls.js)
@@ -328,7 +343,13 @@ app.get('/watch', { preHandler: apiGuard('watch') }, async (req, reply) => {
   if (type && type !== 'sub' && type !== 'dub') {
     return reply.code(400).send({ error: "'type' must be 'sub' or 'dub'" });
   }
-  const src = await agg.getSources(provider, episodeId, undefined, type === 'dub' ? 'dub' : 'sub');
+  let src;
+  try {
+    src = await agg.getSources(provider, episodeId, undefined, type === 'dub' ? 'dub' : 'sub');
+  } catch (e) {
+    const code = /unknown provider/i.test(e.message || '') ? 400 : 502;
+    return reply.code(code).send({ error: `could not resolve sources: ${e.message}` });
+  }
   const ref = src.headers?.Referer;
   const base = proxyBase(req);
   // m3u8 sources may need a playlist-deobfuscation key (src.pk); subtitles never do.

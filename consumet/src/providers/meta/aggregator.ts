@@ -141,7 +141,7 @@ const pickTitle = (t: any): string =>
  *   shows behave exactly as before. Tunables are the consts above.
  */
 class AnimeAggregator {
-  private readonly client: AxiosInstance = axios.create({ timeout: 20000 });
+  private readonly client: AxiosInstance = axios.create({ timeout: Number(process.env.HTTP_TIMEOUT_MS) || 20000 });
   readonly providers: AnimeParser[];
 
   /** @param providers anime providers to aggregate (default: AniNeko + AnimeNoSub + AnikotoTV + ReAnime + Gogoanime + AnimeUnity) */
