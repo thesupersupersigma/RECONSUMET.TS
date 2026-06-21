@@ -166,7 +166,7 @@ reviewable:
 
 ---
 
-## 2. Fragile / dead extractors — make failure modes explicit
+## 2. Fragile / dead extractors — make failure modes explicit  ✅ DONE (commit e87237b)
 **Audit result (already checked): neither dead extractor is reachable from a live provider.**
 No provider imports `filemoon` or `bilibili`; `animenosub.ts` only references "Filemoon" in a
 comment and already throws `Moon … not supported`. Both are only re-exported from
@@ -191,7 +191,7 @@ but worth doing so they can't silently fail if wired up later.
 
 ---
 
-## 3. API hardening
+## 3. API hardening  ✅ DONE (commit 9a81b76)
 **File:** `api/src/server.mjs` (+ `api/package.json`)
 
 - **Rebrand the description.** `api/package.json:6` says *"Self-host HTTP API over the anime
@@ -238,7 +238,7 @@ but worth doing so they can't silently fail if wired up later.
 
 ---
 
-## 4. Robustness pass
+## 4. Robustness pass  ✅ DONE (commit fe6897d)
 - **Graceful degradation.** `getMappings`/`getEpisodes` already try/catch per provider.
   Verify `getSources` (`aggregator.ts:155-159`) and the `/watch` + `/info` + `/episodes`
   routes return a **clean error** (4xx/502 JSON), never a raw 500 stack:
