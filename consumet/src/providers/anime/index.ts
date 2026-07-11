@@ -1,6 +1,9 @@
 import AniNeko from './anineko';
 import AnimeNoSub from './animenosub';
 import AnikotoTV from './anikototv';
+import AniZone from './anizone';
+import AniDB from './anidb';
+import UniqueStream from './uniquestream';
 import ReAnime from './reanime';
 import Gogoanime from './gogoanime';
 import AnimePahe from './animepahe';
@@ -17,6 +20,18 @@ export default {
   // to megaplay (HLS + English soft subs), Kiwi-Stream to vibeplayer. Reuses both
   // existing extractors — no new crack.
   AnikotoTV,
+  // Browser-free, server-rendered on its own CDN; the HLS master sits directly in a
+  // <media-player src> attribute (no extractor). Japanese audio + rich soft-subtitle
+  // tracks (incl. English .ass). CDN is TLS-fingerprint gated → plays via the proxy.
+  AniZone,
+  // Self-hosted; genuinely multi-server (one server per audio language, e.g. JP + EN).
+  // anidb.app metadata is Cloudflare TLS-gated → fetched via curl-impersonate; the
+  // hls.anidb.app video CDN is un-gated (segments are .xls-disguised MPEG-TS).
+  AniDB,
+  // Self-hosted Crunchyroll re-host on its own *.mediacache.cc CDN; self-documented FastAPI.
+  // Genuinely multi-server: one server per audio locale (JP sub + every dub). Signed short-TTL
+  // HLS (resolve fresh); segments are .png-disguised MPEG-TS (proxy is extension-agnostic).
+  UniqueStream,
   // Browser-free REST API; gives high-quality .ass English soft subs for free.
   // Video (flixcloud) is WASM/PBKDF2/AES-gated — crack pending (see SOURCES.md).
   ReAnime,

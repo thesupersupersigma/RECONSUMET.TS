@@ -5,6 +5,9 @@ import { compareTwoStrings } from '../../utils/utils';
 import AniNeko from '../anime/anineko';
 import AnimeNoSub from '../anime/animenosub';
 import AnikotoTV from '../anime/anikototv';
+import AniZone from '../anime/anizone';
+import AniDB from '../anime/anidb';
+import UniqueStream from '../anime/uniquestream';
 import ReAnime from '../anime/reanime';
 import Gogoanime from '../anime/gogoanime';
 import AnimeUnity from '../anime/animeunity';
@@ -171,6 +174,17 @@ class AnimeAggregator {
       new ReAnime(),
       new Gogoanime(),
       new AnimeUnity(),
+      // AniZone appended last: browser-free, HLS master straight off a <media-player src>
+      // (no extractor); Japanese audio + rich soft subs. CDN is TLS-gated → plays via /proxy.
+      new AniZone(),
+      // AniDB appended last: self-hosted, genuinely multi-server (one server per audio
+      // language). anidb.app metadata is Cloudflare TLS-gated → the provider fetches it via
+      // curl-impersonate (needs CURL_IMPERSONATE_BIN); the hls.anidb.app CDN is un-gated.
+      new AniDB(),
+      // UniqueStream appended last: self-hosted Crunchyroll re-host, self-documented FastAPI,
+      // genuinely multi-server (one server per audio locale — JP sub + every dub). Un-gated API;
+      // signed short-TTL HLS on *.mediacache.cc; .png-disguised MPEG-TS segments.
+      new UniqueStream(),
     ];
   }
 

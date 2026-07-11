@@ -44,7 +44,16 @@ const PROXY_TIMEOUT_MS = Number(process.env.PROXY_TIMEOUT_MS) || 30000;
 // answer with a 403. A working binary path in production is required, not just this code.
 const CURL_BIN = process.env.CURL_IMPERSONATE_BIN || '';
 const CURL_ARGS = (process.env.CURL_IMPERSONATE_ARGS || '').split(' ').filter(Boolean);
-const TLS_HOSTS = (process.env.TLS_IMPERSONATE_HOSTS || 'flixcloud.cc,overcdn.site')
+// vid-cdn.xyz / xin-cdn.xyz are AniZone's own CDN — TLS-fingerprint (JA3/JA4) gated the
+// same way as flixcloud/overcdn (plain handshakes are reset), so its manifests/segments/keys
+// must go through curl-impersonate too.
+// anidb.app is Cloudflare TLS-gated: the AniDB *provider* fetches its metadata (search/
+// episodes/languages/embed) through this same CURL_IMPERSONATE_BIN — it's listed here as the
+// canonical registry of hosts needing impersonation. NOTE: anidb.app metadata is resolved
+// provider-side (not via /proxy); only its un-gated hls.anidb.app CDN traffic actually flows
+// through /proxy, and that suffix-matches this entry so segments also get impersonated —
+// harmless (impersonation succeeds on the CDN too), just not strictly required there.
+const TLS_HOSTS = (process.env.TLS_IMPERSONATE_HOSTS || 'flixcloud.cc,overcdn.site,vid-cdn.xyz,xin-cdn.xyz,anidb.app')
   .split(',')
   .map(s => s.trim())
   .filter(Boolean);
