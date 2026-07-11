@@ -25,7 +25,7 @@ interface NekoServer {
   url: string;
   /** embed host, e.g. `vibeplayer.site` */
   host: string;
-  /** `sub` | `dub` (derived from the attached vtt or absence of one) */
+  /** `sub` | `dub` (from the server tab's `data-id`; vtt-name heuristic as fallback) */
   type: 'sub' | 'dub';
   /** true if a separate (soft) English `.vtt` is attached */
   soft: boolean;
@@ -190,11 +190,27 @@ class AniNeko extends AnimeParser {
     return servers.map(s => ({ name: `${s.name} (${s.type}${s.soft ? ', soft' : ''})`, url: s.url }));
   };
 
-  /** player page → `[data-video]` embeds, categorised by the attached vtt */
+  /** player page → `[data-video]` embeds, categorised by the server tab they hang under */
   private parseServers = async (episodeId: string): Promise<NekoServer[]> => {
     const url = episodeId.startsWith('http') ? episodeId : `${this.baseUrl}/watch/${episodeId}`;
     const { data } = await this.client.get(url, { headers: { Referer: this.baseUrl, 'User-Agent': USER_AGENT } });
     const $ = load(data);
+
+    // PRIMARY dub/sub signal (verified live, Jul 2026): AniNeko groups servers under
+    // `.nv-server-tab` buttons, each carrying `data-id` (`hsub` | `sub` | `dub`) plus a
+    // `tab_N` class; every `[data-video]` server links to its tab via `data-tab="tab_N"`.
+    // So `data-id="dub"` is the real, subtitle-INDEPENDENT dub marker. This matters because
+    // true dub servers frequently ship with NO subtitle query param (dub audio needs no vtt)
+    // — e.g. /watch/naruto/ep-1, where all servers are param-less — so the old vtt-name
+    // heuristic silently bucketed those dubs as `sub`. We map `tab_N` → type here and use it
+    // as the primary signal; the vtt `_dub_`/`_sub_` heuristic is only a fallback for pages
+    // that lack the tabs. (`hsub` hardsub and `sub` softsub both count as `sub`.)
+    const tabType = new Map<string, 'sub' | 'dub'>();
+    $('.nv-server-tab').each((_i, el) => {
+      const tabKey = ($(el).attr('class') ?? '').split(/\s+/).find(c => /^tab_\d+$/.test(c));
+      const dataId = ($(el).attr('data-id') ?? '').trim().toLowerCase();
+      if (tabKey && dataId) tabType.set(tabKey, dataId === 'dub' ? 'dub' : 'sub');
+    });
 
     const servers: NekoServer[] = [];
     $('[data-video]').each((_i, el) => {
@@ -209,7 +225,9 @@ class AniNeko extends AnimeParser {
       // the English .vtt rides in one of several query params, depending on host
       const params = new URL(video).searchParams;
       const subtitle = params.get('sub') ?? params.get('caption_1') ?? params.get('c1_file') ?? undefined;
-      const type: 'sub' | 'dub' = /_dub_eng|_dub_/i.test(subtitle ?? '') ? 'dub' : 'sub';
+      // primary: the server tab's data-id; fallback: legacy vtt-name heuristic
+      const tabbed = tabType.get(($(el).attr('data-tab') ?? '').trim());
+      const type: 'sub' | 'dub' = tabbed ?? (/_dub_eng|_dub_/i.test(subtitle ?? '') ? 'dub' : 'sub');
       servers.push({
         name: $(el).text().trim().slice(0, 24) || host,
         url: video,

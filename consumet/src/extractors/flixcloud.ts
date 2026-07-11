@@ -170,6 +170,11 @@ class FlixCloud extends VideoExtractor {
         }
       }
 
+      // NOTE: unlike vibeplayer/megaplay we do NOT verifyMasterPlaylist() here — the
+      // master is on a JA3/Cloudflare-gated host (403 to plain axios) and its playlist
+      // body is XOR-obfuscated (`pk`), so a library-level plain-fetch check can't
+      // observe the real manifest and would reject *every* source, not just dead ones.
+      // Existence must be verified in the api/ curl-impersonate proxy layer instead.
       const result: ISource = {
         // playlist + segments are on a CF/JA3-gated CDN — fetch via the
         // TLS-impersonating stream proxy, with this Referer. The playlists are

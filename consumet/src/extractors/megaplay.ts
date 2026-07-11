@@ -1,5 +1,5 @@
 import { VideoExtractor, IVideo, ISource } from '../models';
-import { USER_AGENT } from '../utils';
+import { USER_AGENT, verifyMasterPlaylist } from '../utils';
 
 /**
  * MegaPlay (megaplay.buzz) extractor.
@@ -34,6 +34,12 @@ class MegaPlay extends VideoExtractor {
 
       const file: string | undefined = data?.sources?.file;
       if (!file) throw new Error('no source file in getSources response');
+
+      // Hard existence check: confirm the master `file` actually resolves upstream
+      // (2xx + real HLS body) before reporting it. A currently-airing episode can
+      // return a well-formed URL that only 502/404s later at playback; throwing here
+      // lets the aggregator fall through to the next candidate/provider instead.
+      await verifyMasterPlaylist(this.client, file, headers);
 
       const result: ISource = {
         headers: { Referer: `${origin}/` },

@@ -210,9 +210,17 @@ class AnikotoTV extends AnimeParser {
     });
     const $ = load(srv.result ?? '');
 
+    // dub/sub signal (verified live, Jul 2026): `/ajax/server/list` wraps every server
+    // in a `<div class="type" data-type="sub|dub">…<ul><li data-link-id>…`. Confirmed each
+    // `li[data-link-id]` sits inside a `.type` wrapper (none flat/un-wrapped) and dub servers
+    // are reliably under `data-type="dub"` — so reading the wrapper's `data-type` is the
+    // reliable signal (unlike AniNeko, there is no subtitle-param ambiguity here). `.trim()
+    // .toLowerCase()` guards against casing/whitespace drift; any non-`dub` value → `sub`.
     const servers: AnikotoServer[] = [];
     $('.type').each((_i, typeEl) => {
-      const type = ($(typeEl).attr('data-type') === 'dub' ? 'dub' : 'sub') as 'sub' | 'dub';
+      const type = (($(typeEl).attr('data-type') ?? '').trim().toLowerCase() === 'dub' ? 'dub' : 'sub') as
+        | 'sub'
+        | 'dub';
       $(typeEl)
         .find('li[data-link-id]')
         .each((_j, li) => {

@@ -1,5 +1,5 @@
 import { VideoExtractor, IVideo, ISource } from '../models';
-import { USER_AGENT } from '../utils';
+import { USER_AGENT, verifyMasterPlaylist } from '../utils';
 
 /**
  * VibePlayer (vibeplayer.site) — the "HD-1" server on AniNeko.
@@ -32,6 +32,12 @@ class VibePlayer extends VideoExtractor {
       } catch (_) {
         // fall back to the constructed path
       }
+
+      // Hard existence check: confirm the master actually resolves upstream (2xx +
+      // real HLS body) before we report it. A currently-airing episode can hand back
+      // a well-formed URL that only 502/404s later at playback; throwing here lets the
+      // aggregator fall through to the next candidate/provider instead.
+      await verifyMasterPlaylist(this.client, master, headers);
 
       const result: ISource = {
         headers: { Referer: `${origin}/` },

@@ -2,10 +2,54 @@
 import { load } from 'cheerio';
 // import * as blurhash from 'blurhash';
 import { ProxyConfig } from '../models';
-import axios, { AxiosRequestConfig } from 'axios';
+import axios, { AxiosRequestConfig, AxiosInstance } from 'axios';
 
 export const USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/83.0.4103.116 Safari/537.36';
+
+/**
+ * Confirm that a resolved HLS master-playlist URL actually exists upstream before
+ * an extractor reports it as a playable `ISource`.
+ *
+ * Some sources hand back a well-formed `.m3u8` URL (constructed or scraped) whose
+ * segments aren't encoded yet — e.g. a currently-airing episode. The URL only
+ * 502/404s later, at playback time, long after the API and site have reported
+ * "success". This does a lightweight, short-timeout GET, requires a 2xx status,
+ * and confirms the body really is an HLS playlist (`#EXTM3U`). On any failure it
+ * throws an explicit error so the aggregator's per-provider fallthrough can move
+ * on to the next candidate instead of trusting a dead source.
+ *
+ * NOTE: only usable for hosts reachable with a plain client — do NOT use it on
+ * TLS/JA3-gated CDNs or hosts that serve obfuscated (e.g. XOR'd) playlist bodies,
+ * where a plain fetch can't observe the real manifest.
+ */
+export const verifyMasterPlaylist = async (
+  client: AxiosInstance,
+  url: string,
+  headers: Record<string, string>,
+  timeout = 8000
+): Promise<void> => {
+  const airing = `master playlist not available upstream (still airing?): ${url}`;
+  let status: number;
+  let body: unknown;
+  try {
+    const res = await client.get(url, {
+      headers,
+      timeout,
+      responseType: 'text',
+      // resolve on any HTTP status so we can throw our own, clearer message
+      validateStatus: () => true,
+    });
+    status = res.status;
+    body = res.data;
+  } catch (err) {
+    throw new Error(`${airing} — ${(err as Error).message}`);
+  }
+  if (status < 200 || status >= 300) throw new Error(`${airing} — HTTP ${status}`);
+  const text = typeof body === 'string' ? body : String(body);
+  if (!text.trimStart().startsWith('#EXTM3U'))
+    throw new Error(`${airing} — response is not a valid HLS manifest`);
+};
 export const days = ['Saturday', 'Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
 export const ANIFY_URL = 'https://anify.eltik.cc';
 

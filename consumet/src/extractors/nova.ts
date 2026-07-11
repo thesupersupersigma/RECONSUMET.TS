@@ -1,7 +1,7 @@
 import { createDecipheriv } from 'crypto';
 
 import { VideoExtractor, IVideo, ISource } from '../models';
-import { USER_AGENT } from '../utils';
+import { USER_AGENT, verifyMasterPlaylist } from '../utils';
 
 /**
  * Nova (nova.upn.one) extractor.
@@ -45,6 +45,13 @@ class Nova extends VideoExtractor {
 
       const master: string | undefined = data?.cf || data?.source;
       if (!master) throw new Error('no master playlist in decrypted payload');
+
+      // Hard existence check: confirm the master actually resolves upstream (2xx +
+      // real HLS body) before reporting it. Nova's only master fetch below is
+      // best-effort, so without this a currently-airing episode's 502/404 master
+      // would still be returned as a "successful" source. Throwing here lets the
+      // aggregator fall through to the next candidate/provider instead.
+      await verifyMasterPlaylist(this.client, master, headers);
 
       const result: ISource = {
         headers: { Referer: `${this.host}/` },

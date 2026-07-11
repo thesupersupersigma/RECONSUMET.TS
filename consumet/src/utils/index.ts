@@ -30,6 +30,7 @@ import {
   substringAfter,
   substringBefore,
   compareTwoStrings,
+  verifyMasterPlaylist,
 } from './utils';
 import {
   anilistSearchQuery,
@@ -87,5 +88,6 @@ export {
   substringAfter,
   substringBefore,
   compareTwoStrings,
+  verifyMasterPlaylist,
   VidMoly,
 };
