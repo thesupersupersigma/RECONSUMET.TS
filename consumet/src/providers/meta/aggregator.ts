@@ -28,6 +28,18 @@ export interface IProviderMapping {
   score: number; // base title-similarity (0..1), pre-heuristic — what /info reports
 }
 
+/**
+ * Optional capability: a provider that can surface EVERY server for an episode (not just its
+ * default pick), default first. Not part of the AnimeParser interface — {@link getSourcesAll}
+ * detects it structurally and falls back to the singular fetchEpisodeSources otherwise.
+ */
+interface MultiServerParser {
+  fetchEpisodeSourcesAll(episodeId: string, subOrDub?: 'sub' | 'dub'): Promise<ISource[]>;
+}
+
+const hasMultiServer = (p: AnimeParser): p is AnimeParser & MultiServerParser =>
+  typeof (p as Partial<MultiServerParser>).fetchEpisodeSourcesAll === 'function';
+
 /** AniList metadata used for matching + verification (resolved once per request). */
 interface AniMeta {
   titles: string[]; // english, romaji, native, ...synonyms (filtered) — match ALL; native/synonyms carry ordinals
@@ -358,6 +370,25 @@ class AnimeAggregator {
     const provider = this.providers.find(p => p.name.toLowerCase() === providerName.toLowerCase());
     if (!provider) throw new Error(`unknown provider: ${providerName}`);
     return provider.fetchEpisodeSources(episodeId, ...args);
+  };
+
+  /**
+   * Fetch ALL available servers for an episode as an array of {@link ISource}, default/auto-play
+   * choice first. Providers that implement {@link MultiServerParser.fetchEpisodeSourcesAll}
+   * (AniNeko, AnikotoTV) surface every server; the rest (ReAnime, AnimeNoSub, Gogoanime,
+   * AnimeUnity) fall back to their singular {@link AnimeParser.fetchEpisodeSources} wrapped in a
+   * 1-element array — behaving exactly as before.
+   */
+  getSourcesAll = async (
+    providerName: string,
+    episodeId: string,
+    subOrDub?: 'sub' | 'dub'
+  ): Promise<ISource[]> => {
+    const provider = this.providers.find(p => p.name.toLowerCase() === providerName.toLowerCase());
+    if (!provider) throw new Error(`unknown provider: ${providerName}`);
+    if (hasMultiServer(provider)) return provider.fetchEpisodeSourcesAll(episodeId, subOrDub);
+    // fallback: providers without the multi-server method → single-element array, unchanged.
+    return [await provider.fetchEpisodeSources(episodeId, undefined, subOrDub)];
   };
 }
 

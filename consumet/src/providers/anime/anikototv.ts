@@ -170,6 +170,47 @@ class AnikotoTV extends AnimeParser {
   };
 
   /**
+   * Multi-server variant of {@link fetchEpisodeSources}: resolve EVERY server of the
+   * requested type (not just the HD-1 default) and return one {@link ISource} per server
+   * that resolves. Servers that fail are skipped (logged, not thrown). The array is ordered
+   * so the singular method's default pick — **HD-1 (megaplay, soft English subs)** — is
+   * first, so a consumer taking index 0 gets today's exact default behavior. Each result is
+   * tagged with `serverName`. Additive: the AnimeParser-interface {@link fetchEpisodeSources}
+   * is unchanged.
+   *
+   * @param episodeId `"<animeId>/<ep>"`
+   * @param subOrDub `sub` (default) or `dub`
+   */
+  fetchEpisodeSourcesAll = async (episodeId: string, subOrDub: 'sub' | 'dub' = 'sub'): Promise<ISource[]> => {
+    const servers = await this.parseServers(episodeId);
+    if (servers.length === 0) throw new Error('no servers returned by /ajax/server/list');
+
+    const ofType = servers.filter(s => s.type === subOrDub);
+    const pool = ofType.length ? ofType : servers;
+    // HD-1 = megaplay = soft English subs; keep it first so index 0 == the singular default.
+    const pick = pool.find(s => /HD-1/i.test(s.name)) ?? pool[0];
+    const ordered = [pick, ...pool.filter(s => s !== pick)];
+
+    const settled = await Promise.allSettled(
+      ordered.map(async s => {
+        const embed = await this.resolveEmbed(s.linkId);
+        if (!embed) throw new Error(`could not resolve embed for server ${s.name}`);
+        const src = await this.extractEmbed(embed);
+        src.serverName = s.name;
+        return src;
+      })
+    );
+
+    const out: ISource[] = [];
+    settled.forEach((r, i) => {
+      if (r.status === 'fulfilled') out.push(r.value);
+      else console.warn(`[AnikotoTV] server "${ordered[i].name}" (${subOrDub}) failed: ${(r.reason as Error)?.message ?? r.reason}`);
+    });
+    if (out.length === 0) throw new Error('all servers failed to resolve');
+    return out;
+  };
+
+  /**
    * @param episodeId `"<animeId>/<ep>"`
    */
   override fetchEpisodeServers = async (episodeId: string): Promise<IEpisodeServer[]> => {

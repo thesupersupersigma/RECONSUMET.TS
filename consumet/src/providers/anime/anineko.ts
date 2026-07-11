@@ -163,9 +163,13 @@ class AniNeko extends AnimeParser {
       const ofType = servers.filter(s => s.type === subOrDub);
       const pool = ofType.length ? ofType : servers;
 
-      // VibePlayer ("HD-1") is the wired video backend; prefer the soft-sub one.
+      // VibePlayer ("HD-1") is the wired video backend. Key on the soft-sub signal first —
+      // it's the actual differentiator this server exists for, and survives a host rename —
+      // then fall back to the host string. AniNeko renamed this host off `vibeplayer.site`
+      // (observed July 2026, e.g. `vivibebe.site`), so check both old and new names rather
+      // than hard-coding one, so a future rename doesn't silently break this again.
       const vibe =
-        pool.find(s => s.host.includes('vibeplayer') && s.soft) ?? pool.find(s => s.host.includes('vibeplayer'));
+        pool.find(s => s.soft) ?? pool.find(s => s.host.includes('vibeplayer') || s.host.includes('vivibebe'));
       if (!vibe) {
         const offered = [...new Set(servers.map(s => `${s.name}/${s.host} (${s.type}${s.soft ? ',soft' : ''})`))].join(', ');
         throw new Error(`no VibePlayer/HD-1 server (only wired backend). Offered: ${offered}`);
@@ -180,6 +184,61 @@ class AniNeko extends AnimeParser {
     } catch (err) {
       throw new Error(`Failed to fetch episode sources: ${(err as Error).message}`);
     }
+  };
+
+  /**
+   * Multi-server variant of {@link fetchEpisodeSources}: resolve EVERY server of the requested
+   * type through {@link VibePlayer} (the wired backend) and return one {@link ISource} per
+   * server that resolves. Non-VibePlayer servers simply fail to extract and are skipped
+   * (logged, not thrown). The array is ordered so the singular method's default pick — the
+   * **soft-sub VibePlayer** (else any VibePlayer) — is first, so a consumer taking index 0
+   * gets today's exact default behavior. Each result carries its server's own English `.vtt`
+   * (when present) and a `serverName` tag. Additive: {@link fetchEpisodeSources} is unchanged.
+   *
+   * @param episodeId `<slug>/ep-N`
+   * @param subOrDub `sub` (default) or `dub`
+   */
+  fetchEpisodeSourcesAll = async (episodeId: string, subOrDub: 'sub' | 'dub' = 'sub'): Promise<ISource[]> => {
+    const servers = await this.parseServers(episodeId);
+    if (servers.length === 0) throw new Error('no servers found on player page');
+
+    const ofType = servers.filter(s => s.type === subOrDub);
+    const pool = ofType.length ? ofType : servers;
+
+    // default pick, kept first so index 0 == the auto-play default. The first two clauses mirror
+    // the singular fetchEpisodeSources selector EXACTLY, so parity holds wherever it still works.
+    // The rest are host-rename resilience: AniNeko has moved the VibePlayer/HD-1 backend off
+    // `vibeplayer.site` (e.g. `vivibebe.site`), which the host check no longer matches — fall back
+    // to the server carrying an English .vtt (the soft-sub differentiator this source exists for;
+    // `soft` is the name-confirmed subset, `subtitle` catches vtts whose name doesn't match the
+    // `_sub_` heuristic), then the first available, so the soft-sub HD-1 still lands at index 0.
+    const pick =
+      pool.find(s => s.host.includes('vibeplayer') && s.soft) ??
+      pool.find(s => s.host.includes('vibeplayer')) ??
+      pool.find(s => s.soft) ??
+      pool.find(s => s.subtitle) ??
+      pool[0];
+    const ordered = pick ? [pick, ...pool.filter(s => s !== pick)] : [...pool];
+
+    const settled = await Promise.allSettled(
+      ordered.map(async s => {
+        const src = await new VibePlayer(this.proxyConfig, this.adapter).extract(new URL(s.url));
+        if (s.subtitle) src.subtitles = [{ url: s.subtitle, lang: 'English' }];
+        src.serverName = s.name;
+        return src;
+      })
+    );
+
+    const out: ISource[] = [];
+    settled.forEach((r, i) => {
+      if (r.status === 'fulfilled') out.push(r.value);
+      else
+        console.warn(
+          `[AniNeko] server "${ordered[i].name}" (${ordered[i].host}, ${subOrDub}) failed: ${(r.reason as Error)?.message ?? r.reason}`
+        );
+    });
+    if (out.length === 0) throw new Error('all servers failed to resolve');
+    return out;
   };
 
   /**

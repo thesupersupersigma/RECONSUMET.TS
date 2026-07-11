@@ -337,6 +337,13 @@ export interface ISource {
   download?: string;
   embedURL?: string;
   /**
+   * Which source-site server this stream came from (e.g. `HD-1`, `Kiwi-Stream`).
+   * Set by providers that surface multiple servers per episode (see
+   * `fetchEpisodeSourcesAll`) so a client can label/select between them. The
+   * singular `fetchEpisodeSources` path leaves this undefined.
+   */
+  serverName?: string;
+  /**
    * Optional base64 key for proxies that must decrypt the HLS *playlist* body
    * before serving it (e.g. FlixCloud XOR-obfuscates playlists with a per-video
    * key). The API threads this to `/proxy` as `&pk=` so each playlist response

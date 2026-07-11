@@ -347,8 +347,16 @@ app.get('/episodes/:anilistId', { preHandler: apiGuard('scrape') }, async (req, 
   }
 });
 
-// raw sources for both sub and dub, fetched concurrently and returned together.
-// Each type is null if it was rejected or yielded zero sources; 502 only if both are null.
+// All servers for both sub and dub, fetched concurrently and returned together.
+//
+// RESPONSE SHAPE CHANGE (paired site-side change is being handled separately this session):
+// `sub` and `dub` are now ARRAYS of per-server results (previously a single object each),
+// ordered with the provider's default/auto-play server FIRST — a client that just takes
+// index [0] gets the previous default behavior, while the rest are selectable alternates.
+// Each array element has the same per-source shape as before, plus `serverName`:
+//   { serverName?, sources[] (wrapped url + rawUrl), subtitles[] (wrapped), headers?, intro?, outro?, pk? }
+// A type is null if it was rejected or yielded zero playable servers; 502 only if both are null.
+// Providers without multi-server support come back as a 1-element array (getSourcesAll fallback).
 app.get('/watch', { preHandler: apiGuard('watch') }, async (req, reply) => {
   const { provider, episodeId } = req.query;
   if (!provider || !episodeId) {
@@ -356,11 +364,11 @@ app.get('/watch', { preHandler: apiGuard('watch') }, async (req, reply) => {
   }
 
   const base = proxyBase(req);
-  // shape a single getSources result into the response object, or null if it has no sources.
-  // Each source/subtitle url is wrapped through /proxy (Referer-injecting + TLS-impersonating),
+  // shape ONE server's ISource into a response object, or null if it has no sources. Each
+  // source/subtitle url is wrapped through /proxy (Referer-injecting + TLS-impersonating),
   // with the original kept as rawUrl. m3u8 sources thread the playlist-deobfuscation key
   // (src.pk) so XOR-obfuscated FlixCloud/ReAnime playlists decode; subtitles never need it.
-  const shape = src => {
+  const shapeOne = src => {
     if (!src || !(src.sources?.length)) return null;
     const ref = src.headers?.Referer;
     const wrap = (u, pk) => (u ? wrapUrl(base, u, ref, pk) : u);
@@ -368,23 +376,29 @@ app.get('/watch', { preHandler: apiGuard('watch') }, async (req, reply) => {
       sources: src.sources.map(s => ({ ...s, url: wrap(s.url, src.pk), rawUrl: s.url })),
       subtitles: (src.subtitles ?? []).map(s => ({ ...s, url: wrap(s.url), rawUrl: s.url })),
     };
+    if (src.serverName != null) out.serverName = src.serverName;
     if (src.headers != null) out.headers = src.headers;
     if (src.intro != null) out.intro = src.intro;
     if (src.outro != null) out.outro = src.outro;
     if (src.pk != null) out.pk = src.pk;
     return out;
   };
+  // shape a getSourcesAll() list into an array of server results (default first), or null if none.
+  const shapeAll = list => {
+    const arr = (Array.isArray(list) ? list : []).map(shapeOne).filter(Boolean);
+    return arr.length ? arr : null;
+  };
 
   const [subRes, dubRes] = await Promise.allSettled([
-    agg.getSources(provider, episodeId, undefined, 'sub'),
-    agg.getSources(provider, episodeId, undefined, 'dub'),
+    agg.getSourcesAll(provider, episodeId, 'sub'),
+    agg.getSourcesAll(provider, episodeId, 'dub'),
   ]);
 
-  if (subRes.status === 'rejected') app.log.warn({ provider: req.query.provider, err: subRes.reason?.message }, 'sub getSources failed');
-  if (dubRes.status === 'rejected') app.log.warn({ provider: req.query.provider, err: dubRes.reason?.message }, 'dub getSources failed');
+  if (subRes.status === 'rejected') app.log.warn({ provider: req.query.provider, err: subRes.reason?.message }, 'sub getSourcesAll failed');
+  if (dubRes.status === 'rejected') app.log.warn({ provider: req.query.provider, err: dubRes.reason?.message }, 'dub getSourcesAll failed');
 
-  const sub = subRes.status === 'fulfilled' ? shape(subRes.value) : null;
-  const dub = dubRes.status === 'fulfilled' ? shape(dubRes.value) : null;
+  const sub = subRes.status === 'fulfilled' ? shapeAll(subRes.value) : null;
+  const dub = dubRes.status === 'fulfilled' ? shapeAll(dubRes.value) : null;
 
   if (!sub && !dub) {
     return reply.code(502).send({ error: 'no sources found for sub or dub' });
