@@ -4,6 +4,7 @@ import AnikotoTV from './anikototv';
 import AniZone from './anizone';
 import AniDB from './anidb';
 import UniqueStream from './uniquestream';
+import KickAssAnime from './kaa';
 import ReAnime from './reanime';
 import Gogoanime from './gogoanime';
 import AnimePahe from './animepahe';
@@ -32,6 +33,11 @@ export default {
   // Genuinely multi-server: one server per audio locale (JP sub + every dub). Signed short-TTL
   // HLS (resolve fresh); segments are .png-disguised MPEG-TS (proxy is extension-agnostic).
   UniqueStream,
+  // Self-hosted KickAssAnime: clean JSON API (kaa.lt/api) → krussdomi HLS. Genuinely multi-audio
+  // (one master carries Japanese + English audio groups = sub + dub); segments are on rotating
+  // .jpg-disguised CDN hosts that gate on Origin (proxy injects it). Only VidStreaming/HLS is used
+  // (BirdStream is DASH); non-JP/EN dubs are usually DASH-only and skipped.
+  KickAssAnime,
   // Browser-free REST API; gives high-quality .ass English soft subs for free.
   // Video (flixcloud) is WASM/PBKDF2/AES-gated — crack pending (see SOURCES.md).
   ReAnime,

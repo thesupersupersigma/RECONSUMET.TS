@@ -13,6 +13,7 @@ export const PROVIDERS_LIST = {
     new ANIME.AniZone(),
     new ANIME.AniDB(),
     new ANIME.UniqueStream(),
+    new ANIME.KickAssAnime(),
     new ANIME.ReAnime(),
     new ANIME.Gogoanime(),
     new ANIME.AnimePahe(),

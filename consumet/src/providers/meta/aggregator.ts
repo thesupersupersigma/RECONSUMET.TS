@@ -8,6 +8,7 @@ import AnikotoTV from '../anime/anikototv';
 import AniZone from '../anime/anizone';
 import AniDB from '../anime/anidb';
 import UniqueStream from '../anime/uniquestream';
+import KickAssAnime from '../anime/kaa';
 import ReAnime from '../anime/reanime';
 import Gogoanime from '../anime/gogoanime';
 import AnimeUnity from '../anime/animeunity';
@@ -185,6 +186,11 @@ class AnimeAggregator {
       // genuinely multi-server (one server per audio locale — JP sub + every dub). Un-gated API;
       // signed short-TTL HLS on *.mediacache.cc; .png-disguised MPEG-TS segments.
       new UniqueStream(),
+      // KickAssAnime appended last: self-hosted, clean JSON API → krussdomi HLS. Genuinely
+      // multi-audio (one master carries JP sub + EN dub audio groups). Un-gated API; segments are
+      // .jpg-disguised MPEG-TS on rotating CDN hosts that gate on Origin (injected by /proxy). Only
+      // VidStreaming/HLS is used (BirdStream is DASH); non-JP/EN dubs are usually DASH-only.
+      new KickAssAnime(),
     ];
   }
 

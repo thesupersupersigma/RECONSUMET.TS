@@ -360,6 +360,13 @@ export interface ISource {
    * content key. Not used for plain providers.
    */
   keyMediaId?: string;
+  /**
+   * Optional ISO 639-2 audio-track language a proxy should force as the HLS master's default
+   * (KickAssAnime serves one multi-audio master with Japanese `DEFAULT=YES`; for the English dub
+   * the proxy rewrites the master so the `eng` audio group is default). The API threads this to
+   * `/proxy` as `&aud=`. Not used for single-audio providers.
+   */
+  audioDefault?: string;
 }
 
 /**

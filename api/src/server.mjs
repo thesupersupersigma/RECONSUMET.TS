@@ -148,17 +148,20 @@ const cloakReachable = async () => {
 // ---- proxy link building + HLS rewrite ----
 
 const proxyBase = req => process.env.PUBLIC_URL || `${req.protocol}://${req.headers.host}`;
-const wrapUrl = (base, url, ref, pk, km) =>
+const wrapUrl = (base, url, ref, pk, km, org, aud) =>
   `${base}/proxy?url=${encodeURIComponent(url)}` +
   `${ref ? `&ref=${encodeURIComponent(ref)}` : ''}` +
   `${pk ? `&pk=${encodeURIComponent(pk)}` : ''}` +
-  `${km ? `&km=${encodeURIComponent(km)}` : ''}`;
+  `${km ? `&km=${encodeURIComponent(km)}` : ''}` +
+  `${org ? `&org=${encodeURIComponent(org)}` : ''}` +
+  `${aud ? `&aud=${encodeURIComponent(aud)}` : ''}`;
 
 // rewrite an HLS playlist so every segment / sub-playlist / key goes back through the
-// proxy. `pk` (playlist XOR key) and `km` (UniqueStream key.bin media_id) are propagated so
-// child playlists are de-obfuscated and their key.bin URIs get the key transform too.
-const rewriteM3U8 = (text, baseUrl, ref, base, pk, km) => {
-  const wrap = u => wrapUrl(base, new URL(u, baseUrl).href, ref, pk, km);
+// proxy. `pk` (playlist XOR key), `km` (UniqueStream key.bin media_id), `org` (segment-CDN
+// Origin) and `aud` (KickAssAnime default-audio language) are propagated so child playlists
+// inherit de-obfuscation, the key transform, the Origin header and the audio-default rewrite.
+const rewriteM3U8 = (text, baseUrl, ref, base, pk, km, org, aud) => {
+  const wrap = u => wrapUrl(base, new URL(u, baseUrl).href, ref, pk, km, org, aud);
   return text
     .split('\n')
     .map(line => {
@@ -166,6 +169,23 @@ const rewriteM3U8 = (text, baseUrl, ref, base, pk, km) => {
       if (!l) return line;
       if (l.startsWith('#')) return line.replace(/URI="([^"]+)"/g, (_m, u) => `URI="${wrap(u)}"`);
       return wrap(l);
+    })
+    .join('\n');
+};
+
+// KickAssAnime serves one HLS master with both a Japanese (DEFAULT=YES) and an English audio
+// group; for the dub we must make the requested audio the default so a player picks it. Rewrite
+// each `#EXT-X-MEDIA:TYPE=AUDIO` line: DEFAULT/AUTOSELECT=YES on the matching LANGUAGE, NO on the
+// rest. No-op on non-master playlists (no audio media lines) and when `aud` is unset.
+const setDefaultAudio = (text, aud) => {
+  if (!aud) return text;
+  return text
+    .split('\n')
+    .map(line => {
+      if (!line.startsWith('#EXT-X-MEDIA:') || !/TYPE=AUDIO/.test(line)) return line;
+      const target = new RegExp(`LANGUAGE="${aud}"`, 'i').test(line);
+      const stripped = line.replace(/,DEFAULT=(?:YES|NO)/gi, '').replace(/,AUTOSELECT=(?:YES|NO)/gi, '');
+      return stripped + (target ? ',DEFAULT=YES,AUTOSELECT=YES' : ',DEFAULT=NO,AUTOSELECT=NO');
     })
     .join('\n');
 };
@@ -399,9 +419,10 @@ app.get('/watch', { preHandler: apiGuard('watch') }, async (req, reply) => {
   const shapeOne = src => {
     if (!src || !(src.sources?.length)) return null;
     const ref = src.headers?.Referer;
-    const wrap = (u, pk, km) => (u ? wrapUrl(base, u, ref, pk, km) : u);
+    const org = src.headers?.Origin;
+    const wrap = (u, pk, km, aud) => (u ? wrapUrl(base, u, ref, pk, km, org, aud) : u);
     const out = {
-      sources: src.sources.map(s => ({ ...s, url: wrap(s.url, src.pk, src.keyMediaId), rawUrl: s.url })),
+      sources: src.sources.map(s => ({ ...s, url: wrap(s.url, src.pk, src.keyMediaId, src.audioDefault), rawUrl: s.url })),
       subtitles: (src.subtitles ?? []).map(s => ({ ...s, url: wrap(s.url), rawUrl: s.url })),
     };
     if (src.serverName != null) out.serverName = src.serverName;
@@ -410,6 +431,7 @@ app.get('/watch', { preHandler: apiGuard('watch') }, async (req, reply) => {
     if (src.outro != null) out.outro = src.outro;
     if (src.pk != null) out.pk = src.pk;
     if (src.keyMediaId != null) out.keyMediaId = src.keyMediaId;
+    if (src.audioDefault != null) out.audioDefault = src.audioDefault;
     return out;
   };
   // shape a getSourcesAll() list into an array of server results (default first), or null if none.
@@ -443,12 +465,14 @@ app.get('/proxy', { preHandler: rateLimit('proxy') }, async (req, reply) => {
   const ref = req.query.ref;
   const pk = req.query.pk;
   const km = req.query.km;
+  const org = req.query.org; // segment-CDN Origin (KickAssAnime segments 403 without it)
+  const aud = req.query.aud; // default-audio language for the HLS master (KickAssAnime dub)
   if (!target) return reply.code(400).send({ error: "missing 'url' query param" });
   if (!isHttpUrl(target)) return reply.code(400).send({ error: "'url' must be an http(s) URL" });
 
   // UniqueStream key.bin: send the load-bearing x-am-media-id header, then transform the body below.
   const isKeyBin = km && /key\.bin(\?|$)/.test(target);
-  const extraHeaders = isKeyBin ? { 'x-am-media-id': km } : undefined;
+  const extraHeaders = { ...(isKeyBin ? { 'x-am-media-id': km } : {}), ...(org ? { Origin: org } : {}) };
 
   let up;
   try {
@@ -480,9 +504,9 @@ app.get('/proxy', { preHandler: rateLimit('proxy') }, async (req, reply) => {
   const isPlaylist = ct.includes('mpegurl') || /\.m3u8(\?|$)/.test(target);
 
   if (isPlaylist) {
-    const text = deobfuscatePlaylist(await up.text(), pk);
+    const text = setDefaultAudio(deobfuscatePlaylist(await up.text(), pk), aud);
     reply.header('content-type', 'application/vnd.apple.mpegurl');
-    return reply.send(rewriteM3U8(text, new URL(target), ref, proxyBase(req), pk, km));
+    return reply.send(rewriteM3U8(text, new URL(target), ref, proxyBase(req), pk, km, org, aud));
   }
 
   // segments / keys / vtt — stream through, preserving range/length headers
