@@ -14,6 +14,7 @@ export const PROVIDERS_LIST = {
     new ANIME.AniDB(),
     new ANIME.UniqueStream(),
     new ANIME.KickAssAnime(),
+    new ANIME.Senshi(),
     new ANIME.ReAnime(),
     new ANIME.Gogoanime(),
     new ANIME.AnimePahe(),

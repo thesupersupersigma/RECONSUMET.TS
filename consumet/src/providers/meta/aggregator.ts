@@ -9,6 +9,7 @@ import AniZone from '../anime/anizone';
 import AniDB from '../anime/anidb';
 import UniqueStream from '../anime/uniquestream';
 import KickAssAnime from '../anime/kaa';
+import Senshi from '../anime/senshi';
 import ReAnime from '../anime/reanime';
 import Gogoanime from '../anime/gogoanime';
 import AnimeUnity from '../anime/animeunity';
@@ -191,6 +192,11 @@ class AnimeAggregator {
       // .jpg-disguised MPEG-TS on rotating CDN hosts that gate on Origin (injected by /proxy). Only
       // VidStreaming/HLS is used (BirdStream is DASH); non-JP/EN dubs are usually DASH-only.
       new KickAssAnime(),
+      // Senshi appended last: self-hosted, clean REST API → ninstream HLS. Genuinely multi-server
+      // per audio type (HardSub = sub with burned-in EN subs; Dub = English). Un-gated API; segments
+      // are .jpg-disguised MPEG-TS, unencrypted, gating only on Referer: senshi.live (injected by
+      // /proxy). No TLS impersonation needed.
+      new Senshi(),
     ];
   }
 

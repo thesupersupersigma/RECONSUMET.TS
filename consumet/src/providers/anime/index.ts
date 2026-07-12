@@ -5,6 +5,7 @@ import AniZone from './anizone';
 import AniDB from './anidb';
 import UniqueStream from './uniquestream';
 import KickAssAnime from './kaa';
+import Senshi from './senshi';
 import ReAnime from './reanime';
 import Gogoanime from './gogoanime';
 import AnimePahe from './animepahe';
@@ -38,6 +39,11 @@ export default {
   // .jpg-disguised CDN hosts that gate on Origin (proxy injects it). Only VidStreaming/HLS is used
   // (BirdStream is DASH); non-JP/EN dubs are usually DASH-only and skipped.
   KickAssAnime,
+  // Self-hosted senshi.live: clean REST API (POST /anime/filter → /episodes → /episode-embeds) →
+  // ninstream HLS. Genuinely multi-server per audio type (HardSub = sub w/ burned-in EN subs; Dub =
+  // English). Un-gated API; segments are .jpg-disguised MPEG-TS, unencrypted, gating only on
+  // Referer: senshi.live (injected by /proxy). No TLS impersonation needed.
+  Senshi,
   // Browser-free REST API; gives high-quality .ass English soft subs for free.
   // Video (flixcloud) is WASM/PBKDF2/AES-gated — crack pending (see SOURCES.md).
   ReAnime,
