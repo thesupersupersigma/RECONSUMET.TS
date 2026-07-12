@@ -25,6 +25,9 @@ interface UniqueStreamSource {
   original: boolean;
   /** soft subtitle tracks, if the media response ships any */
   subtitles: ISubtitle[];
+  /** media response `media_id` — the proxy needs it to derive the real HLS key from the
+   * `key.bin` response (see {@link ISource.keyMediaId}) */
+  mediaId?: string;
 }
 
 /**
@@ -50,10 +53,16 @@ interface UniqueStreamSource {
  *             (region resolution). `playlist` is a real signed master.m3u8. The original (sub)
  *             audio ships **no** in-manifest subs, so for it we serve the English `hard_subs`
  *             playlist (Japanese audio + burned-in English subs); dub audio needs no subs.
- * - Video:    the signed master is real HLS (1080p + AAC). **Segments use a `.png` extension**
- *             (image/png-disguised MPEG-TS, like AniDB's `.xls`) — the `/proxy` is already
- *             extension/content-type agnostic, so nothing special is needed. The URLs are
- *             short-TTL signed, so we always resolve fresh at request time (never cache them).
+ * - Video:    the signed master is real HLS (1080p + AAC). Segments use a `.png` extension
+ *             (image/png-disguised MPEG-TS, like AniDB's `.xls`) **and are AES-128 encrypted
+ *             with a bespoke key**: the playlist's `#EXT-X-KEY` points at a `key.bin` that
+ *             serves base64 *ciphertext* (not a raw 16-byte key). The player recovers the real
+ *             key by AES-128-CBC-decrypting that body with `sha256("key"+media_id)[:16]` /
+ *             `sha256("iv"+media_id)[:16]`, having first sent the `media_id` as the
+ *             `x-am-media-id` request header (the CDN encrypts key.bin against it). We surface
+ *             `media_id` on the source as {@link ISource.keyMediaId} so the `/proxy` reproduces
+ *             this transform; segments then decrypt with a standard HLS AES-128 engine. The URLs
+ *             are short-TTL signed, so we always resolve fresh at request time (never cache them).
  */
 class UniqueStream extends AnimeParser {
   override readonly name = 'UniqueStream';
@@ -303,7 +312,7 @@ class UniqueStream extends AnimeParser {
       .filter((s: any) => s?.url)
       .map((s: any) => ({ url: s.url, lang: this.localeName(s.language) }));
 
-    return { master, locale: hls.locale ?? locale, original, subtitles };
+    return { master, locale: hls.locale ?? locale, original, subtitles, mediaId: data?.media_id };
   };
 
   private toSource = (s: UniqueStreamSource): ISource => ({
@@ -311,6 +320,9 @@ class UniqueStream extends AnimeParser {
     sources: [{ url: s.master, quality: 'auto', isM3U8: true }],
     subtitles: s.subtitles,
     serverName: this.localeName(s.locale),
+    // the mediacache.cc segments are AES-128 with a bespoke `key.bin` (base64 ciphertext,
+    // not a raw key); the proxy uses this media_id to derive the real content key.
+    ...(s.mediaId ? { keyMediaId: s.mediaId } : {}),
   });
 }
 

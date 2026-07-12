@@ -350,6 +350,16 @@ export interface ISource {
    * can be de-obfuscated. Not used for plain providers.
    */
   pk?: string;
+  /**
+   * Optional `media_id` for proxies that must derive the real HLS content key from a
+   * transformed `key.bin` response (UniqueStream serves the AES-128 key as base64
+   * ciphertext, not a raw 16-byte key). The API threads this to `/proxy` as `&km=`; for
+   * a `key.bin` request the proxy sends it as the `x-am-media-id` header (load-bearing —
+   * the CDN encrypts the key.bin body against it) and AES-128-CBC-decrypts the body with
+   * `key = sha256("key"+media_id)[:16]`, `iv = sha256("iv"+media_id)[:16]` into the real
+   * content key. Not used for plain providers.
+   */
+  keyMediaId?: string;
 }
 
 /**

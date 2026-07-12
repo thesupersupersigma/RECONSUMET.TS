@@ -29,6 +29,7 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import { Readable } from 'node:stream';
 import { spawn } from 'node:child_process';
+import crypto from 'node:crypto';
 import pkg from '../../consumet/dist/index.js';
 
 const { AnimeAggregator } = pkg;
@@ -147,15 +148,17 @@ const cloakReachable = async () => {
 // ---- proxy link building + HLS rewrite ----
 
 const proxyBase = req => process.env.PUBLIC_URL || `${req.protocol}://${req.headers.host}`;
-const wrapUrl = (base, url, ref, pk) =>
+const wrapUrl = (base, url, ref, pk, km) =>
   `${base}/proxy?url=${encodeURIComponent(url)}` +
   `${ref ? `&ref=${encodeURIComponent(ref)}` : ''}` +
-  `${pk ? `&pk=${encodeURIComponent(pk)}` : ''}`;
+  `${pk ? `&pk=${encodeURIComponent(pk)}` : ''}` +
+  `${km ? `&km=${encodeURIComponent(km)}` : ''}`;
 
 // rewrite an HLS playlist so every segment / sub-playlist / key goes back through the
-// proxy. `pk` (if set) is propagated so child playlists are de-obfuscated too.
-const rewriteM3U8 = (text, baseUrl, ref, base, pk) => {
-  const wrap = u => wrapUrl(base, new URL(u, baseUrl).href, ref, pk);
+// proxy. `pk` (playlist XOR key) and `km` (UniqueStream key.bin media_id) are propagated so
+// child playlists are de-obfuscated and their key.bin URIs get the key transform too.
+const rewriteM3U8 = (text, baseUrl, ref, base, pk, km) => {
+  const wrap = u => wrapUrl(base, new URL(u, baseUrl).href, ref, pk, km);
   return text
     .split('\n')
     .map(line => {
@@ -181,6 +184,20 @@ const deobfuscatePlaylist = (text, pkB64) => {
   } catch {
     return text;
   }
+};
+
+// UniqueStream serves its AES-128 `key.bin` as base64 *ciphertext*, not a raw 16-byte key.
+// Reproduce the player's transform: base64-decode the body, then AES-128-CBC-decrypt it with
+// key = sha256("key"+media_id)[:16] and iv = sha256("iv"+media_id)[:16] → the real content key.
+// (The key.bin fetch must also carry `x-am-media-id: media_id` — the CDN encrypts the body
+// against that header, so a mismatched/absent id yields an undecryptable body.)
+const sha256 = s => crypto.createHash('sha256').update(s, 'utf8').digest();
+const deriveUniqueStreamKey = (bodyText, mediaId) => {
+  const ciphertext = Buffer.from(bodyText.trim(), 'base64');
+  const key = sha256('key' + mediaId).subarray(0, 16);
+  const iv = sha256('iv' + mediaId).subarray(0, 16);
+  const d = crypto.createDecipheriv('aes-128-cbc', key, iv); // PKCS7 padding on by default
+  return Buffer.concat([d.update(ciphertext), d.final()]);
 };
 
 // ---- upstream fetch: plain fetch, or curl-impersonate for JA3-gated CDNs ----
@@ -218,7 +235,7 @@ const streamToString = async stream => {
 
 // run curl-impersonate, resolving as soon as the response header block is parsed so the
 // body (fd 1) can stream. Response headers are dumped to fd 3 (parent reads child.stdio[3]).
-const impersonatedFetch = (target, { referer, range }) =>
+const impersonatedFetch = (target, { referer, range, extraHeaders }) =>
   new Promise((resolve, reject) => {
     // The CDN gate needs a *fetch*-style request (like hls.js), not curl-impersonate's
     // default *navigation* headers — Referer alone is rejected. We override the
@@ -239,6 +256,7 @@ const impersonatedFetch = (target, { referer, range }) =>
       ...(origin ? { Origin: origin } : {}),
       ...(referer ? { Referer: referer } : {}),
       ...(range ? { Range: range } : {}),
+      ...(extraHeaders || {}),
     };
     const args = [...CURL_ARGS, '-sS', '-N', '--max-time', String(Math.ceil(PROXY_TIMEOUT_MS / 1000)), '-D', '/dev/fd/3'];
     for (const [k, v] of Object.entries(hdrs)) args.push('-H', `${k}: ${v}`);
@@ -268,9 +286,9 @@ const impersonatedFetch = (target, { referer, range }) =>
   });
 
 // unified upstream: returns { status, getHeader, text, nodeStream, cleanup }
-const proxiedUpstream = async (target, { referer, range }) => {
+const proxiedUpstream = async (target, { referer, range, extraHeaders }) => {
   if (needsImpersonation(target)) {
-    const r = await impersonatedFetch(target, { referer, range });
+    const r = await impersonatedFetch(target, { referer, range, extraHeaders });
     return {
       status: r.status,
       getHeader: name => r.headers[name.toLowerCase()],
@@ -286,6 +304,7 @@ const proxiedUpstream = async (target, { referer, range }) => {
   const headers = { 'User-Agent': UA };
   if (referer) headers.Referer = referer;
   if (range) headers.Range = range;
+  if (extraHeaders) Object.assign(headers, extraHeaders);
   const r = await fetch(target, { headers, signal: AbortSignal.timeout(PROXY_TIMEOUT_MS) });
   return {
     status: r.status,
@@ -380,9 +399,9 @@ app.get('/watch', { preHandler: apiGuard('watch') }, async (req, reply) => {
   const shapeOne = src => {
     if (!src || !(src.sources?.length)) return null;
     const ref = src.headers?.Referer;
-    const wrap = (u, pk) => (u ? wrapUrl(base, u, ref, pk) : u);
+    const wrap = (u, pk, km) => (u ? wrapUrl(base, u, ref, pk, km) : u);
     const out = {
-      sources: src.sources.map(s => ({ ...s, url: wrap(s.url, src.pk), rawUrl: s.url })),
+      sources: src.sources.map(s => ({ ...s, url: wrap(s.url, src.pk, src.keyMediaId), rawUrl: s.url })),
       subtitles: (src.subtitles ?? []).map(s => ({ ...s, url: wrap(s.url), rawUrl: s.url })),
     };
     if (src.serverName != null) out.serverName = src.serverName;
@@ -390,6 +409,7 @@ app.get('/watch', { preHandler: apiGuard('watch') }, async (req, reply) => {
     if (src.intro != null) out.intro = src.intro;
     if (src.outro != null) out.outro = src.outro;
     if (src.pk != null) out.pk = src.pk;
+    if (src.keyMediaId != null) out.keyMediaId = src.keyMediaId;
     return out;
   };
   // shape a getSourcesAll() list into an array of server results (default first), or null if none.
@@ -422,12 +442,17 @@ app.get('/proxy', { preHandler: rateLimit('proxy') }, async (req, reply) => {
   const target = req.query.url;
   const ref = req.query.ref;
   const pk = req.query.pk;
+  const km = req.query.km;
   if (!target) return reply.code(400).send({ error: "missing 'url' query param" });
   if (!isHttpUrl(target)) return reply.code(400).send({ error: "'url' must be an http(s) URL" });
 
+  // UniqueStream key.bin: send the load-bearing x-am-media-id header, then transform the body below.
+  const isKeyBin = km && /key\.bin(\?|$)/.test(target);
+  const extraHeaders = isKeyBin ? { 'x-am-media-id': km } : undefined;
+
   let up;
   try {
-    up = await proxiedUpstream(target, { referer: ref, range: req.headers.range });
+    up = await proxiedUpstream(target, { referer: ref, range: req.headers.range, extraHeaders });
   } catch (e) {
     return reply.code(502).send({ error: `upstream fetch failed: ${e.message}` });
   }
@@ -435,13 +460,29 @@ app.get('/proxy', { preHandler: rateLimit('proxy') }, async (req, reply) => {
   if (up.cleanup) reply.raw.on('close', up.cleanup);
 
   reply.header('Access-Control-Allow-Origin', '*');
+
+  // key.bin → derive and return the real 16-byte AES-128 content key (the downstream HLS
+  // engine then decrypts segments with it as a standard AES-128 key).
+  if (isKeyBin) {
+    try {
+      const keyOut = deriveUniqueStreamKey(await up.text(), km);
+      reply.header('content-type', 'application/octet-stream');
+      reply.header('content-length', String(keyOut.length));
+      return reply.send(keyOut);
+    } catch (e) {
+      return reply.code(502).send({ error: `key.bin transform failed: ${e.message}` });
+    } finally {
+      if (up.cleanup) up.cleanup();
+    }
+  }
+
   const ct = up.getHeader('content-type') || '';
   const isPlaylist = ct.includes('mpegurl') || /\.m3u8(\?|$)/.test(target);
 
   if (isPlaylist) {
     const text = deobfuscatePlaylist(await up.text(), pk);
     reply.header('content-type', 'application/vnd.apple.mpegurl');
-    return reply.send(rewriteM3U8(text, new URL(target), ref, proxyBase(req), pk));
+    return reply.send(rewriteM3U8(text, new URL(target), ref, proxyBase(req), pk, km));
   }
 
   // segments / keys / vtt — stream through, preserving range/length headers
