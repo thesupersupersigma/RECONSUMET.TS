@@ -9,6 +9,7 @@ import Senshi from './senshi';
 import ReAnime from './reanime';
 import Gogoanime from './gogoanime';
 import AnimePahe from './animepahe';
+import Mkissa from './mkissa';
 import AnimeUnity from './animeunity';
 
 export default {
@@ -49,6 +50,11 @@ export default {
   ReAnime,
   Gogoanime,
   AnimePahe,
+  // AllAnime/AllManga skin (mkissa.to). Ungated SvelteKit frontend over the Cloudflare-gated
+  // api.allanime.day GraphQL API (same Managed Challenge as AnimePahe → shared Byparr solver).
+  // Persisted-query hash + AES-256-GCM response envelope reversed from the client; sources are
+  // third-party embeds (mp4upload/streamwish/…) resolved via existing extractors.
+  Mkissa,
   // Optional fallback: Italian site. Kept as a working video source —
   // English captions come from the external subtitle layer, not the host.
   AnimeUnity,

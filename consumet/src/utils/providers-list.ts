@@ -18,6 +18,7 @@ export const PROVIDERS_LIST = {
     new ANIME.ReAnime(),
     new ANIME.Gogoanime(),
     new ANIME.AnimePahe(),
+    new ANIME.Mkissa(),
     new ANIME.AnimeUnity(),
   ],
   MANGA: [

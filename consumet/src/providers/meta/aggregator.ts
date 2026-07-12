@@ -12,6 +12,8 @@ import KickAssAnime from '../anime/kaa';
 import Senshi from '../anime/senshi';
 import ReAnime from '../anime/reanime';
 import Gogoanime from '../anime/gogoanime';
+import AnimePahe from '../anime/animepahe';
+import Mkissa from '../anime/mkissa';
 import AnimeUnity from '../anime/animeunity';
 
 const ANILIST_GRAPHQL = 'https://graphql.anilist.co';
@@ -197,6 +199,17 @@ class AnimeAggregator {
       // are .jpg-disguised MPEG-TS, unencrypted, gating only on Referer: senshi.live (injected by
       // /proxy). No TLS impersonation needed.
       new Senshi(),
+      // AnimePahe appended last: large catalogue behind Cloudflare's Managed Challenge — cleared via
+      // the shared Byparr solver (CloudflareSolver: solve once for cf_clearance+UA, cache, reuse on
+      // plain HTTP, auto re-solve on 403). Genuinely multi-server per episode (sub=jpn / dub=eng, each
+      // at 360/720/1080p as separate kwik embeds). kwik → *.uwucdn.top HLS, standard AES-128 over
+      // .jpg-disguised MPEG-TS, gating only on Referer: kwik.cx (injected by /proxy).
+      new AnimePahe(),
+      // Mkissa appended last (provider #13): AllAnime/AllManga skin. Cloudflare-gated api.allanime.day
+      // GraphQL (shared Byparr solver); persisted-query hash + AES-256-GCM `tobeparsed` envelope cracked
+      // from the client. Sub+dub. Sources are third-party embeds (mp4upload/streamwish/…) resolved via
+      // existing extractors; internal `--`/clock links are skipped (their CDN 500s server-side).
+      new Mkissa(),
     ];
   }
 

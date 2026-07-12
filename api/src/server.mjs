@@ -54,7 +54,10 @@ const CURL_ARGS = (process.env.CURL_IMPERSONATE_ARGS || '').split(' ').filter(Bo
 // provider-side (not via /proxy); only its un-gated hls.anidb.app CDN traffic actually flows
 // through /proxy, and that suffix-matches this entry so segments also get impersonated —
 // harmless (impersonation succeeds on the CDN too), just not strictly required there.
-const TLS_HOSTS = (process.env.TLS_IMPERSONATE_HOSTS || 'flixcloud.cc,overcdn.site,vid-cdn.xyz,xin-cdn.xyz,anidb.app')
+// uwucdn.top is AnimePahe's kwik video CDN — it answers ONLY over HTTP/2 (403s HTTP/1.1), which
+// Node's plain `fetch` can't do, so its master/key/segments must go through curl-impersonate (which
+// speaks HTTP/2). Suffix-matches the rotating `vault-NN.uwucdn.top` segment hosts.
+const TLS_HOSTS = (process.env.TLS_IMPERSONATE_HOSTS || 'flixcloud.cc,overcdn.site,vid-cdn.xyz,xin-cdn.xyz,anidb.app,uwucdn.top')
   .split(',')
   .map(s => s.trim())
   .filter(Boolean);
