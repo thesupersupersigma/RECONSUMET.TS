@@ -11,8 +11,10 @@ class VidMoly extends VideoExtractor {
       const headers = { 'User-Agent': USER_AGENT, Referer: origin };
       const { data } = await this.client.get(videoUrl.href, { headers });
 
-      // jwplayer's `file:` may use single OR double quotes
-      const links = data.match(/file:\s*["']([^"']+)["']/);
+      // jwplayer's `file:` may use single OR double quotes. The embed page also emits an
+      // earlier `file:` for a thumbnail-preview "slides" API URL, so match must require an
+      // actual video extension to avoid grabbing that instead of the real source.
+      const links = data.match(/file:\s*["']([^"']+\.(?:m3u8|mp4)[^"']*)["']/);
       if (!links?.[1]) throw new Error('vidmoly: no source file found on embed page');
 
       const m3u8Content = await this.client.get(links[1], { headers });

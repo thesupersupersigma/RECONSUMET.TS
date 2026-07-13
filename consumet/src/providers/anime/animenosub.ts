@@ -196,7 +196,12 @@ class AnimeNoSub extends AnimeParser {
 
       const nova = pool.find(m => /nova\.upn\./i.test(m.url));
       if (nova) {
-        return await new Nova(this.proxyConfig, this.adapter).extract(new URL(nova.url));
+        try {
+          return await new Nova(this.proxyConfig, this.adapter).extract(new URL(nova.url));
+        } catch {
+          // Nova throws when a still-airing episode's CDN master isn't ready yet
+          // (verifyMasterPlaylist) — fall through to the next mirror in the pool.
+        }
       }
 
       const vidmoly = pool.find(m => /vidmoly\./i.test(m.url));

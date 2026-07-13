@@ -53,9 +53,11 @@ provider instead of confidently serving S1.
   has a per-episode `.epl-date`). So "year" comes from the **slug**, and slugs carry the
   **ordinal** (`...-season-4`, `anineko.ts:101`), not a year. The ordinal token is the real
   discriminator these providers give us.
-- **`Gogoanime.fetchAnimeInfo` spins up a cloakbrowser render** (CLAUDE.md). `getMappings` is
-  called by `/info` for *all* providers → we must **not** eagerly fetch episode lists for
-  runner-up candidates during mapping. Verification has to be cost-aware.
+- ~~`Gogoanime.fetchAnimeInfo` spins up a cloakbrowser render~~ — **resolved**: Gogoanime's
+  episode list is now fetched over plain HTTP (the WP AJAX nonce/params it needs are already
+  in the raw page HTML), so cloakbrowser is gone entirely (`browser-fetcher.ts` deleted).
+  `BROWSER_BACKED` in `aggregator.ts` is now empty but kept as a hook for any future
+  provider whose `fetchAnimeInfo` is genuinely expensive.
 
 ---
 ### TIER 1 — cheap candidate ranking (in `getMappings`/`bestMatch`, NO episode fetches)
@@ -145,8 +147,8 @@ Resolve S1/S2/S3 AniList ids via `agg.search(...)` at test time (don't hardcode 
 wrong season **falls through** rather than serving S1:
 - Kaguya-sama (S1/S2/S3 — ordinal + "Ultra Romantic" named case), **Re:Zero S2** (same count as
   S1 → ordinal must break it, count can't), one **ongoing** show (count unreliable → ordinal path).
-- Prefer browser-free providers (AniNeko/AnimeNoSub) so cloakbrowser isn't required. Tune the
-  constants here if a real case needs it.
+- All current providers (including Gogoanime) are browser-free; no cloakbrowser dependency
+  remains. Tune the constants here if a real case needs it.
 
 ### 1f. Known limitations (report these)
 - Re-ranks/verifies only **what the provider's search returns**. If a clone never surfaces the
@@ -227,10 +229,10 @@ but worth doing so they can't silently fail if wired up later.
   Leave a one-line comment saying so.
 - **Optional API-key gate** — env-driven, **OFF by default** (`API_KEY` unset → no gate), so
   local/dev keeps working. When set, require a header; `/` and health stay open.
-- **Root `/` route** — keep as health/info, but it currently leaks VM internals
-  (`server.mjs:202-203`: cloakbrowser reachability + TLS-impersonation host list). Gate that
-  detail behind a debug flag (e.g. `DEBUG_INFO=1`); default response shows only
-  name/status/providers/routes.
+- **Root `/` route** — keep as health/info, but it currently leaks VM internals (the
+  TLS-impersonation host list). Gate that detail behind a debug flag (e.g. `DEBUG_INFO=1`);
+  default response shows only name/status/providers/routes. (The cloakbrowser-reachability
+  field this once also leaked has been removed along with the cloakbrowser dependency.)
 - **Port** — defaults to 3000 (`server.mjs:22`), run on 4000 via env in prod. Keep the
   env-driven behavior; add a comment making the default explicit.
 

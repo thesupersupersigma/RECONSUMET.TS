@@ -10,6 +10,12 @@ used `naruto`/`rezero` side stories). Keep this updated as sites are built.
 - 🔵 **CANDIDATE** — known, needs recon
 - ⛔ **BLOCKED** — hard anti-bot / not worth it yet
 
+**cloakbrowser is no longer deployed** (`browser-fetcher.ts` deleted; Gogoanime's episode
+list moved to plain HTTP — its AJAX nonce/params turned out to be readable straight off the
+raw page HTML, no JS execution required). Any note below that says "revisit with
+cloakbrowser" means a real headless-browser CF/Turnstile solver would need to be stood up
+again from scratch for that specific site; it's not a flag you can just flip back on.
+
 ## The thing we keep optimizing for: SOFT captions  — SOLVED for simulcasts
 Provider-native **soft** (separate, toggleable `.vtt`) subtitles:
 - **AniNeko (✅ DONE)** — Soft-Sub servers attach a separate English `.vtt` right in

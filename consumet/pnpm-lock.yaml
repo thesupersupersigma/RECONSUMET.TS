@@ -29,9 +29,6 @@ importers:
       husky:
         specifier: ^9.1.1
         version: 9.1.7
-      puppeteer-core:
-        specifier: ^25.1.0
-        version: 25.1.0
     devDependencies:
       '@commitlint/cli':
         specifier: ^17.6.3
@@ -430,16 +427,6 @@ packages:
     resolution: {integrity: sha512-+1VkjdD0QBLPodGrJUeqarH8VAIvQODIbwh9XpP5Syisf7YoQgsJKPNFoqqLQlu+VQ/tVSshMR6loPMn8U+dPg==}
     engines: {node: '>=14'}
 
-  '@puppeteer/browsers@3.0.4':
-    resolution: {integrity: sha512-HGM8iAmGTf+Y7t0373szVbTmt3d7vPkYL/1bpOkOFO0YUYLgSeuYBCzESklogNPvOBnZ/MRD5f07OkpqH1trtA==}
-    engines: {node: '>=22.12.0'}
-    hasBin: true
-    peerDependencies:
-      proxy-agent: '>=8.0.1'
-    peerDependenciesMeta:
-      proxy-agent:
-        optional: true
-
   '@sinclair/typebox@0.27.10':
     resolution: {integrity: sha512-MTBk/3jGLNB2tVxv6uLlFh1iu64iYOQ2PbdOSK3NW8JZsmlaOh2q6sdtKowBhfw8QFLmYNzTW4/oK4uATIi6ZA==}
 
@@ -719,12 +706,6 @@ packages:
     resolution: {integrity: sha512-WDrybc/gKFpTYQutKIK6UvfcuxijIZfMfXaYm8NMsPQxSYvf+13fXUJ4rztGGbJcBQ/GF55gvrZ0Bc0bj/mqvg==}
     engines: {node: '>=20.18.1'}
 
-  chromium-bidi@16.0.1:
-    resolution: {integrity: sha512-J63PGu/9PpeCwLIcKYyzWP6yaVL5pxuBc0shlYCYM8BaAkmlwiQboXO1iNbOgSDbVklEyYFfNEcHD8oOAWacUA==}
-    engines: {node: '>=20.19.0 <22.0.0 || >=22.12.0'}
-    peerDependencies:
-      devtools-protocol: '*'
-
   ci-info@3.9.0:
     resolution: {integrity: sha512-NIxF55hv4nSqQswkAeiOi1r83xy8JldOFDTWiug55KBu9Jnblncd2U6ViHmYgHf01TPZS77NJBhBMKdWj9HQMQ==}
     engines: {node: '>=8'}
@@ -880,9 +861,6 @@ packages:
   detect-newline@3.1.0:
     resolution: {integrity: sha512-TLz+x/vEXm/Y7P7wn1EJFNLxYpUD4TgMosxY6fAVJUnJMbupHBOncxyWUG9OpTaH9EBD7uFI5LfEgmMOc54DsA==}
     engines: {node: '>=8'}
-
-  devtools-protocol@0.0.1624250:
-    resolution: {integrity: sha512-YFAat/lOiIk0ARmBweG+ygrEcbZrq5B9urRyUoeQKp53MlidHXE2TmTbxKcaXoQj7u/aX+jebDO4BW55rs0WwA==}
 
   diff-sequences@29.6.3:
     resolution: {integrity: sha512-EjePK1srD3P08o2j4f0ExnylqRs5B9tJjcp9t1krH2qRi8CCdsYfwe9JgSLurFBWwq4uOlipzfk5fHNvwFKr8Q==}
@@ -1609,13 +1587,6 @@ packages:
     resolution: {integrity: sha512-tEBHqDnIoM/1rXME1zgka9g6Q2lcoCkxHLuc7ODJ5BxbP5d4c2Z5cGgtXAku59200Cx7diuHTOYfSBD8n6mm8A==}
     engines: {node: '>=16 || 14 >=14.17'}
 
-  mitt@3.0.1:
-    resolution: {integrity: sha512-vKivATfr97l2/QBCYAkXYDbrIWPM2IIKEl7YPhjCvKlG3kE2gm+uBo6nEXK3M5/Ffh/FLpKExzOQ3JJoJGFKBw==}
-
-  modern-tar@0.7.6:
-    resolution: {integrity: sha512-sweCIVXzx1aIGTCdzcMlSZt1h8k5Tmk08VNAuRk3IU28XamGiOH5ypi11g6De2CH7PhYqSSnGy2A/EFhbWnVKg==}
-    engines: {node: '>=18.0.0'}
-
   ms@2.1.3:
     resolution: {integrity: sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA==}
 
@@ -1778,10 +1749,6 @@ packages:
   punycode@2.3.1:
     resolution: {integrity: sha512-vYt7UD1U9Wg6138shLtLOvdAu+8DsC/ilFtEVHcH+wydcSpNE20AfSOduf6MkRFahL5FY7X1oU7nKVZFtfq8Fg==}
     engines: {node: '>=6'}
-
-  puppeteer-core@25.1.0:
-    resolution: {integrity: sha512-jKzy5y4WG6uNuFbTWgW1D7mqoT9o0nllc/6a1DGF775T1mPmgw3scdFEtEq67yVFikavQmbYq6NLfbTfxHSlqQ==}
-    engines: {node: '>=22.12.0'}
 
   pure-rand@6.1.0:
     resolution: {integrity: sha512-bVWawvoZoBYpp6yIoQtQXHZjmz35RSVHnUOTefl8Vcjr8snTPY1wnpSPMWekcFwbxI6gtmT7rSYPFvz71ldiOA==}
@@ -2123,9 +2090,6 @@ packages:
     resolution: {integrity: sha512-TeTSQ6H5YHvpqVwBRcnLDCBnDOHWYu7IvGbHT6N8AOymcr9PJGjc1GTtiWZTYg0NCgYwvnYWEkVChQAr9bjfwA==}
     engines: {node: '>=16'}
 
-  typed-query-selector@2.12.2:
-    resolution: {integrity: sha512-EOPFbyIub4ngnEdqi2yOcNeDLaX/0jcE1JoAXQDDMIthap7FoN795lc/SHfIq2d416VufXpM8z/lD+WRm2gfOQ==}
-
   typedarray@0.0.6:
     resolution: {integrity: sha512-/aCDEGatGvZ2BIk+HmLf4ifCJFwvKFNb9/JeZPMulfgFracn9QFcAf5GO8B/mweUjSoblS5In0cWhqpfs/5PQA==}
 
@@ -2184,9 +2148,6 @@ packages:
   walker@1.0.8:
     resolution: {integrity: sha512-ts/8E8l5b7kY0vlWLewOkDXMmPdLcVV4GmOQLyxuSswIJsweeFZtAsMF7k1Nszz+TYBQrlYRmzOnr398y1JemQ==}
 
-  webdriver-bidi-protocol@0.4.2:
-    resolution: {integrity: sha512-VSV+fzfChirL3e7jay2yUC7B4HQCGtEWEg/MSSQbK+qWbqeGlRLlXTzPpYr3XGUvbpDHumWZBJxgesg4N7dbtA==}
-
   whatwg-encoding@3.1.1:
     resolution: {integrity: sha512-6qN4hJdMwfYBtE3YBTTHhoeuUrDBPZmbQaxWAqSALV/MeEnR5z1xd8UKud2RAkFoPkmB+hli1TZSnyi84xz1vQ==}
     engines: {node: '>=18'}
@@ -2223,18 +2184,6 @@ packages:
     resolution: {integrity: sha512-7KxauUdBmSdWnmpaGFg+ppNjKF8uNLry8LyzjauQDOVONfFLNKrKvQOxZ/VuTIcS/gge/YNahf5RIIQWTSarlg==}
     engines: {node: ^12.13.0 || ^14.15.0 || >=16.0.0}
 
-  ws@8.21.0:
-    resolution: {integrity: sha512-Vsp28b7DRcimFQvrqu2Wek3z1iYxDCWqHYB8Qsnk/S4RfaCQzPGPyBNuVjJV3cd6UiKtUtp6sNM77gWvzcCH+g==}
-    engines: {node: '>=10.0.0'}
-    peerDependencies:
-      bufferutil: ^4.0.1
-      utf-8-validate: '>=5.0.2'
-    peerDependenciesMeta:
-      bufferutil:
-        optional: true
-      utf-8-validate:
-        optional: true
-
   y18n@5.0.8:
     resolution: {integrity: sha512-0pfFzegeDWJHJIAmTLRP2DwHjdF5s7jo9tuztdQxAhINCdvS+3nGINqPd00AphqJR/0LhANUS6/+7SCb98YOfA==}
     engines: {node: '>=10'}
@@ -2267,9 +2216,6 @@ packages:
   yocto-queue@0.1.0:
     resolution: {integrity: sha512-rVksvsnNCdJ/ohGc6xgPwyN8eheCxsiLM8mxuE/t/mOVqJewPuO1miLpTHQiRgTKCLexL4MeAFVagts7HmNZ2Q==}
     engines: {node: '>=10'}
-
-  zod@3.25.76:
-    resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
 
 snapshots:
 
@@ -2792,11 +2738,6 @@ snapshots:
   '@pkgjs/parseargs@0.11.0':
     optional: true
 
-  '@puppeteer/browsers@3.0.4':
-    dependencies:
-      modern-tar: 0.7.6
-      yargs: 17.7.2
-
   '@sinclair/typebox@0.27.10': {}
 
   '@sinonjs/commons@3.0.1':
@@ -3121,12 +3062,6 @@ snapshots:
       undici: 7.28.0
       whatwg-mimetype: 4.0.0
 
-  chromium-bidi@16.0.1(devtools-protocol@0.0.1624250):
-    dependencies:
-      devtools-protocol: 0.0.1624250
-      mitt: 3.0.1
-      zod: 3.25.76
-
   ci-info@3.9.0: {}
 
   cjs-module-lexer@1.4.3: {}
@@ -3271,8 +3206,6 @@ snapshots:
   delayed-stream@1.0.0: {}
 
   detect-newline@3.1.0: {}
-
-  devtools-protocol@0.0.1624250: {}
 
   diff-sequences@29.6.3: {}
 
@@ -4149,10 +4082,6 @@ snapshots:
 
   minipass@7.1.3: {}
 
-  mitt@3.0.1: {}
-
-  modern-tar@0.7.6: {}
-
   ms@2.1.3: {}
 
   natural-compare@1.4.0: {}
@@ -4300,19 +4229,6 @@ snapshots:
       punycode: 2.3.1
 
   punycode@2.3.1: {}
-
-  puppeteer-core@25.1.0:
-    dependencies:
-      '@puppeteer/browsers': 3.0.4
-      chromium-bidi: 16.0.1(devtools-protocol@0.0.1624250)
-      devtools-protocol: 0.0.1624250
-      typed-query-selector: 2.12.2
-      webdriver-bidi-protocol: 0.4.2
-      ws: 8.21.0
-    transitivePeerDependencies:
-      - bufferutil
-      - proxy-agent
-      - utf-8-validate
 
   pure-rand@6.1.0: {}
 
@@ -4661,8 +4577,6 @@ snapshots:
 
   type-fest@4.41.0: {}
 
-  typed-query-selector@2.12.2: {}
-
   typedarray@0.0.6: {}
 
   typescript@5.9.3: {}
@@ -4713,8 +4627,6 @@ snapshots:
     dependencies:
       makeerror: 1.0.12
 
-  webdriver-bidi-protocol@0.4.2: {}
-
   whatwg-encoding@3.1.1:
     dependencies:
       iconv-lite: 0.6.3
@@ -4750,8 +4662,6 @@ snapshots:
       imurmurhash: 0.1.4
       signal-exit: 3.0.7
 
-  ws@8.21.0: {}
-
   y18n@5.0.8: {}
 
   yallist@2.1.2: {}
@@ -4777,5 +4687,3 @@ snapshots:
   yn@3.1.1: {}
 
   yocto-queue@0.1.0: {}
-
-  zod@3.25.76: {}

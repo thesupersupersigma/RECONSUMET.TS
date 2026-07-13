@@ -12,11 +12,9 @@
 //   RATE_LIMIT_WINDOW      rate-limit window in seconds (default 60)
 //   RATE_LIMIT_TRUST_PROXY trust X-Forwarded-For for client IP (default true; needed behind CF / SSR frontends)
 //   API_KEY                if set, /search /info /episodes /watch require it (x-api-key or Bearer). OFF by default.
-//   DEBUG_INFO             if "1"/"true", the / route also exposes cloakbrowser + TLS-impersonation diagnostics (off by default)
+//   DEBUG_INFO             if "1"/"true", the / route also exposes TLS-impersonation diagnostics (off by default)
 //   HTTP_TIMEOUT_MS        (consumet lib) AniList/provider axios timeout (ms, default 20000)
 //   PROXY_TIMEOUT_MS       upstream timeout for /proxy fetches — both plain fetch and curl-impersonate (ms, default 30000)
-//   CLOAK_CDP_URL          cloakbrowser CDP endpoint (default http://localhost:9222) — needed for
-//                          Gogoanime episode lists. Search/info/sources work without it.
 //   PUBLIC_URL             public base url used when building /proxy links (default derived from the request);
 //                          set to the tunnel/public origin so rewritten playlists point back at us, not localhost.
 //   CURL_IMPERSONATE_BIN   path to a curl-impersonate binary/wrapper (e.g. .../curl-impersonate). When set,
@@ -35,7 +33,6 @@ import pkg from '../../consumet/dist/index.js';
 const { AnimeAggregator } = pkg;
 
 const PORT = Number(process.env.PORT) || 3000; // explicit default 3000; production sets PORT=4000
-const CLOAK = process.env.CLOAK_CDP_URL || 'http://localhost:9222';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
 const PROXY_TIMEOUT_MS = Number(process.env.PROXY_TIMEOUT_MS) || 30000;
 
@@ -135,14 +132,6 @@ const isHttpUrl = v => {
   try {
     const u = new URL(v);
     return u.protocol === 'http:' || u.protocol === 'https:';
-  } catch {
-    return false;
-  }
-};
-
-const cloakReachable = async () => {
-  try {
-    return (await fetch(`${CLOAK}/json/version`, { signal: AbortSignal.timeout(4000) })).ok;
   } catch {
     return false;
   }
@@ -357,11 +346,10 @@ app.get('/', async () => {
       proxy: 'GET /proxy?url=<encoded>&ref=<encoded referer>&pk=<encoded>   (HLS/segment/subtitle proxy)',
     },
   };
-  // VM internals (cloakbrowser reachability + TLS-impersonation host list) only when DEBUG_INFO is set
+  // VM internals (TLS-impersonation host list) only when DEBUG_INFO is set
   if (!DEBUG_INFO) return base;
   return {
     ...base,
-    cloakbrowser: (await cloakReachable()) ? 'reachable' : 'UNREACHABLE — Gogoanime episodes need it',
     tlsImpersonation: CURL_BIN ? { enabled: true, hosts: TLS_HOSTS } : { enabled: false },
   };
 });

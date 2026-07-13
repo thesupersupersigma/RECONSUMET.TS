@@ -190,3 +190,32 @@ files `animenosub-source.md` + `anineko-source.md`. Highlights:
   from the Oracle VM IP before ripping it out — see animenosub-source.md caveats).
 - API (`api/`) unchanged: `/search /info /episodes /watch /proxy`. `/watch` should now also surface
   `subtitles[]` for AniNeko/megaplay (the proxy injects Referer for m3u8/vtt).
+
+## Session 6 update — cloakbrowser was NEVER actually needed; fully removed
+The "Gogoanime needs a JS anti-bot browser" claim throughout this doc (Sessions 1–5) was **never
+verified against the live site** and turned out to be false. Investigated properly this session:
+`gogoanimez.to`'s anime-info page returns `HTTP 200` over plain `curl` with the episode list
+empty in raw HTML (`<ul id="episode_related"><li class="loading">...`), but the WordPress AJAX
+params it needs — `data-range-start`/`data-range-end`/`data-seri` on `#episode_page > li a`, and
+the `nonce` in an inline `<script>` — are **already sitting in that same raw HTML**. `POST
+/wp-admin/admin-ajax.php?action=load_episode_range` with those params, **no headers/cookies/UA
+required at all**, returns the full episode list as JSON. No Cloudflare Managed Challenge, no
+Turnstile, no TLS/JA3 gate ever showed up — Cloudflare here is a passive CDN only.
+
+- `gogoanime.ts`'s `fetchAnimeInfo` was rewritten to do exactly that over plain HTTP
+  (`this.client`), replacing the cloakbrowser render. Verified end-to-end live: a back-catalog
+  title (`naruto-2002`, 218 episodes, contiguous) and a currently-airing simulcast (`Azur Lane:
+  Slow Ahead! Season 2`, 2 episodes) both resolve correctly through info → episodes → sources.
+  (Naruto has two real gaps, ep 10 and ep 200 — confirmed the site itself 301s those URLs to the
+  homepage; not a scraping bug, the old browser path would hit the same gap.)
+- **cloakbrowser is now removed entirely, not just optional.** Deleted `src/utils/browser-fetcher.ts`
+  (zero remaining importers repo-wide, confirmed by grep across `consumet/src/**` and `api/**`),
+  dropped `puppeteer-core` from `package.json`/lockfile, removed the `Gogoanime` constructor's
+  `cdpUrl` param, removed the `cloakReachable()`/`CLOAK_CDP_URL` health-check code from
+  `api/src/server.mjs` (the `/` route's `cloakbrowser` field is gone), and cleared `BROWSER_BACKED`
+  in `aggregator.ts` (kept as an empty hook for any future genuinely-expensive provider). Updated
+  README/SETUP/CONTRIBUTING/TODO/SOURCES accordingly. The `cloakhq/cloakbrowser` Docker container
+  the user was running on the VM has no remaining caller anywhere in this repo and can be stopped.
+- **Lesson:** don't carry forward an unverified "needs a browser" assumption across sessions —
+  re-check it against the live site with plain `curl` before building (or keeping) infrastructure
+  around it.

@@ -8,7 +8,6 @@ Bootstrap the anime API on a fresh VM. Repo layout: `consumet/` (the scraper lib
 # Node 20+ and pnpm
 curl -fsSL https://fnm.vercel.app/install | bash && exec $SHELL   # or use your distro's node
 npm i -g pnpm
-# Docker is already installed on the VM (used for cloakbrowser)
 ```
 
 ## 1. Clone (private repo)
@@ -49,18 +48,10 @@ single-binary `--impersonate` build so per-request headers override the profile
 defaults cleanly. (A `pip install curl_cffi` + tiny wrapper works too if you'd
 rather not manage a binary.)
 
-## 5. cloakbrowser (stealth browser for the episode-list step)
-```bash
-docker run -d --name cloak --restart unless-stopped \
-  -p 127.0.0.1:9222:9222 cloakhq/cloakbrowser cloakserve
-curl -s http://localhost:9222/json/version    # expect a webSocketDebuggerUrl
-```
-
-## 6. Run the API
+## 5. Run the API
 ```bash
 cd api
 PORT=3000 \
-CLOAK_CDP_URL=http://localhost:9222 \
 PUBLIC_URL=https://api.thesupersuperanime.lol \
 CURL_IMPERSONATE_BIN=/opt/curl-impersonate/curl-impersonate \
 CURL_IMPERSONATE_ARGS="--impersonate chrome124" \
@@ -69,7 +60,7 @@ pnpm start
 # TLS_IMPERSONATE_HOSTS defaults to "flixcloud.cc,overcdn.site"; add more if needed.
 ```
 
-## 7. Expose at api.thesupersuperanime.lol (Cloudflare Tunnel — no open ports, hides VM IP)
+## 6. Expose at api.thesupersuperanime.lol (Cloudflare Tunnel — no open ports, hides VM IP)
 ```bash
 # install cloudflared, then:
 cloudflared tunnel login
@@ -98,5 +89,4 @@ cloudflared tunnel run anime-api    # (run as a systemd service for persistence)
   decrypt m3u8 → impersonated fetch (200) → XOR-deobfuscate playlists → stream TS segments +
   `.ass` subs. Set `CURL_IMPERSONATE_BIN` and it just works; without it those hosts 403.
 - Gate the public API (API key / referer-allowlist) + add Redis caching before heavy use.
-- Keep Docker memory bounded; `docker stop cloak` when idle.
-- Run cloakbrowser + cloudflared + the API as systemd services (or docker-compose) for durability.
+- Run cloudflared + the API as systemd services (or docker-compose) for durability.

@@ -7,8 +7,11 @@ often), or **docs**.
 
 ## Guiding principles
 
-1. **Browser-free first.** Prefer sources you can scrape over plain HTTP. A headless
-   browser (cloakbrowser/CDP) is a last resort, used only by the Gogoanime fallback.
+1. **Browser-free first.** Prefer sources you can scrape over plain HTTP. Every current
+   provider (including the Gogoanime fallback) is browser-free; there is no headless-browser
+   dependency in this codebase — reach for one only if a future source truly requires JS
+   execution to render content that isn't present in any plain-HTTP response (not just to
+   get past a bot gate — see `SOURCES.md` for that distinction).
 2. **Real soft subtitles win.** A source that yields a separate, toggleable English
    `.vtt`/`.ass` is worth more than one with burned-in (hard) subs.
 3. **Honesty over green checkmarks.** If something only half-works, say so in

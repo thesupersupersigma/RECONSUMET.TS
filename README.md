@@ -38,12 +38,12 @@
 | **AnimeNoSub** | ✅ | ✅ soft (back-catalog via megaplay) | simulcast video via Nova/Vidmoly |
 | **AnikotoTV** | ✅ | ✅ soft (HD-1 via megaplay) | nekostream backend; reuses megaplay + vibeplayer |
 | **ReAnime** | ✅ | ✅ high-quality `.ass` | flixcloud video needs the TLS-impersonating proxy (see below) |
-| **Gogoanime** | needs a headless browser (CDP) | ✅ soft via megaplay | fallback only |
+| **Gogoanime** | ✅ | ✅ soft via megaplay | fallback only |
 | **AnimeUnity** | ✅ | ❌ (Italian) | fallback video |
 
-A headless browser (Chrome DevTools Protocol, e.g. a stealth Chromium) is **optional** —
-only the Gogoanime fallback uses it (`CLOAK_CDP_URL`). See **[`SOURCES.md`](./SOURCES.md)**
-for full per-source status and the candidate-site tracker.
+Every provider is browser-free — no headless-browser/CDP service is required to run this
+project. See **[`SOURCES.md`](./SOURCES.md)** for full per-source status and the
+candidate-site tracker.
 
 ## Layout
 
@@ -69,7 +69,7 @@ pnpm start                        # listens on $PORT (default 3000)
 curl http://localhost:3000/
 ```
 
-For a full VM deployment (Cloudflare Tunnel, cloakbrowser, curl-impersonate), see
+For a full VM deployment (Cloudflare Tunnel, curl-impersonate), see
 **[`SETUP.md`](./SETUP.md)**.
 
 ### Environment variables
@@ -78,7 +78,6 @@ For a full VM deployment (Cloudflare Tunnel, cloakbrowser, curl-impersonate), se
 |---|---|---|
 | `PORT` | `3000` | API listen port |
 | `PUBLIC_URL` | derived from request | Base URL used when building `/proxy` links |
-| `CLOAK_CDP_URL` | `http://localhost:9222` | cloakbrowser CDP endpoint — only the Gogoanime fallback needs it |
 | `CURL_IMPERSONATE_BIN` | *(unset)* | Path to a [curl-impersonate](https://github.com/lexiforest/curl-impersonate) binary; enables fetching CF/JA3-gated CDNs |
 | `CURL_IMPERSONATE_ARGS` | *(empty)* | Extra args, e.g. `--impersonate chrome124` (single-binary builds) |
 | `TLS_IMPERSONATE_HOSTS` | `flixcloud.cc,overcdn.site` | Comma-list of host suffixes routed through curl-impersonate |
@@ -96,7 +95,6 @@ Health + capabilities.
 {
   "name": "anime-api",
   "status": "ok",
-  "cloakbrowser": "UNREACHABLE — Gogoanime episodes need it",
   "tlsImpersonation": { "enabled": true, "hosts": ["flixcloud.cc", "overcdn.site"] },
   "providers": ["AniNeko", "AnimeNoSub", "AnikotoTV", "ReAnime", "Gogoanime", "AnimeUnity"],
   "routes": { /* ... */ }

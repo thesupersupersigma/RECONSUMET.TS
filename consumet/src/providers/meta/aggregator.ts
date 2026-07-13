@@ -69,9 +69,10 @@ const YEAR_BONUS = 0.1;
 const YEAR_PENALTY = 0.15;
 const FORMAT_PENALTY = 0.4; // a TV season mapped onto the movie/OVA, or vice-versa
 const EPISODE_COUNT_TOLERANCE = 3; // ± slack for the count backstop (recaps/specials drift)
-// Providers whose fetchAnimeInfo is expensive (cloakbrowser render). These verify ONLY their
-// top candidate in Tier 2 — never fire extra renders probing alternates.
-const BROWSER_BACKED = new Set(['gogoanime']);
+// Providers whose fetchAnimeInfo is expensive. These verify ONLY their top candidate in
+// Tier 2 — never fire extra probes on alternates. (Empty since Gogoanime moved off
+// cloakbrowser to plain HTTP; kept as a hook for any future provider that needs it.)
+const BROWSER_BACKED = new Set<string>([]);
 
 const ROMAN: Record<string, number> = { ii: 2, iii: 3, iv: 4 };
 const WORD_ORDINAL: Record<string, number> = { second: 2, third: 3, fourth: 4, fifth: 5 };
@@ -380,7 +381,7 @@ class AnimeAggregator {
       const candidates = byProvider.get(key) ?? [];
       if (!provider || candidates.length === 0) continue;
 
-      // cost-aware: don't fire extra cloakbrowser renders probing alternates
+      // cost-aware: don't fire extra fetchAnimeInfo probes on alternates for expensive providers
       const probe = BROWSER_BACKED.has(key) ? candidates.slice(0, 1) : candidates;
       for (const candidate of probe) {
         try {
