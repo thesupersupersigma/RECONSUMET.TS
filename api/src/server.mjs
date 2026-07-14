@@ -9,6 +9,8 @@
 //   RATE_LIMIT_WATCH       per-IP/min for /watch (extractor), default 30
 //   RATE_LIMIT_PROXY       per-IP/min for /proxy, default 600. One video fires hundreds of segment
 //                          requests, so this tier is deliberately high; 0 disables (exempts) it.
+//   RATE_LIMIT_ROOT        per-IP/min for the / health/info route, default 140 (intentionally the
+//                          most generous tier so real health checks never false-429); 0 exempts it.
 //   RATE_LIMIT_WINDOW      rate-limit window in seconds (default 60)
 //   RATE_LIMIT_TRUST_PROXY which proxies to trust when reading X-Forwarded-For for the client IP.
 //                          'true' (default) trusts loopback+private ranges (our Traefik hop) — do
@@ -89,6 +91,10 @@ const RL_TIERS = {
   scrape: Number(process.env.RATE_LIMIT_SCRAPE ?? 60),
   watch: Number(process.env.RATE_LIMIT_WATCH ?? 30),
   proxy: Number(process.env.RATE_LIMIT_PROXY ?? 600), // hundreds of segments/stream — high or 0 (exempt)
+  // `/` health/info: deliberately the most generous tier (> every other route) so a legitimate
+  // Coolify/monitoring health check never risks a false 429, while still capping the sustained,
+  // real CPU load an unthrottled root route otherwise lets anyone generate. 0 disables (exempts).
+  root: Number(process.env.RATE_LIMIT_ROOT ?? 140),
 };
 const API_KEY = process.env.API_KEY || ''; // OFF by default — set to require auth on data routes
 const DEBUG_INFO = /^(1|true)$/i.test(process.env.DEBUG_INFO || '');
@@ -356,7 +362,9 @@ const proxiedUpstream = async (target, { referer, range, extraHeaders }) => {
 
 // ---- meta / scraping routes ----
 
-app.get('/', async () => {
+// Health/info. Rate-limited on its own generous 'root' tier via the same hardened IP
+// resolution as every other route (no separate, spoofable IP path); not API-key gated.
+app.get('/', { preHandler: rateLimit('root') }, async () => {
   const base = {
     name: 'anime-api',
     status: 'ok',
