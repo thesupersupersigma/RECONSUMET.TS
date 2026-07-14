@@ -1,5 +1,83 @@
 # SOURCES — anime site scraping tracker
 
+## ⚠️ READ THIS FIRST — status correction (see full history below)
+
+This doc's history below (mkissa.to marked ⛔ SKIP, no AnimePahe entry, "cloakbrowser is
+no longer deployed") reflects real, accurate investigative work **at the time it was
+written** — but two of its conclusions are now **superseded** and should not be trusted
+at face value without reading this correction first:
+
+- **mkissa.to is now ✅ DONE, not ⛔ SKIP.** The blocker documented below (AllAnime's
+  Cloudflare JS/Turnstile challenge, confirmed un-passable by curl-impersonate alone) was
+  real and correctly diagnosed. What changed: **Byparr** (a maintained, actively-developed
+  FlareSolverr-compatible headless-browser solver) was stood up specifically to clear this
+  exact challenge tier — confirmed working via a live cf_clearance solve, verified reusable
+  outside the solver. `mkissa.ts` is built, wired, and verified end-to-end (real playable
+  video for both sub and dub). See the "Byparr / Cloudflare Managed Challenge" section below
+  for the full build.
+- **AnimePahe is now ✅ DONE.** Was always the top-priority target but had no entry in this
+  doc's original candidate table — it's built via the same Byparr infrastructure as mkissa.to.
+- **"cloakbrowser is no longer deployed"** (below) is still true and *unrelated* to the
+  above — cloakbrowser was a different, older browser dependency (for Gogoanime, which
+  turned out not to need a browser at all) and stays fully removed. Byparr is a distinct,
+  new, currently load-bearing dependency for exactly two sources (AnimePahe, mkissa.to).
+  Don't conflate "no cloakbrowser" with "no browser dependency at all" — that's no longer
+  true.
+
+**The lesson, stated plainly so it doesn't get re-learned the hard way a third time:**
+this project has now twice carried forward a stale "X needs a browser" / "X is blocked"
+assumption across sessions without re-verifying it against the live site or against new
+tooling that became available since (Byparr didn't exist as an option when mkissa.to was
+first marked ⛔). Before treating any status below as current, check whether it's been
+superseded here first, and when genuinely unsure, re-verify live rather than trust either
+this doc or your own memory of it.
+
+## Byparr / Cloudflare Managed Challenge (AnimePahe + mkissa.to) — ✅ DONE
+
+Both sites sit behind Cloudflare's Managed Challenge (Turnstile/JS-VM tier). Confirmed
+this tier hard-blocks: (a) plain HTTP clients, and (b) curl-impersonate/TLS-fingerprint
+spoofing alone — the TLS layer can pass, but the JS/Turnstile challenge itself can't be
+executed without a real browser. FlareSolverr (the original, more widely-known tool for
+this) was tried first and confirmed **unable** to solve this specific challenge version —
+its title-polling/checkbox-click solving logic doesn't clear the invisible Turnstile
+widget, and the project is effectively unmaintained. **Byparr** (github.com/ThePhaseless/
+Byparr), a genuine drop-in FlareSolverr-API-compatible replacement built on Camoufox
+(a more deeply fingerprint-patched Firefox), was deployed instead and confirmed working —
+solves in ~13-15s cold, returns a real, reusable `cf_clearance` cookie + matching
+User-Agent (verified reusable via a plain curl request outside the solver itself, with a
+clean negative-control test: same request without the cookie → 403, with it → 200).
+
+Shared infrastructure: `consumet/src/utils/cf-solver.ts` (`CloudflareSolver` + `http2Get`)
+was built generic and provider-agnostic specifically so both AnimePahe and mkissa.to could
+reuse it as-is — confirmed working for both without modification. It solves an origin
+once via Byparr's `/v1` endpoint, caches the `cf_clearance` + UA pair per-host in a
+process-wide map, reuses it on fast subsequent requests, and auto re-solves + retries once
+on a `403` (cookie expiry/rotation) — no manual intervention needed.
+
+**Load-bearing discovery, applies to both providers**: the entire AnimePahe pipeline
+(main site, kwik embed host, and the `uwucdn.top` video CDN) turned out to be
+**HTTP/2-only** — a valid `cf_clearance` cookie will still `403` over plain HTTP/1.1,
+which is what Node's default `axios`/`fetch` use. This was a genuinely subtle bug that
+initially looked like it "worked" in manual `curl` testing, because `curl` defaults to
+HTTP/2 (masking the problem) — only caught by testing the actual code path, not just a
+manual reproduction. Fixed via Node's built-in `http2` module (`http2Get`, part of
+`cf-solver.ts`), used by both the solver itself and the kwik-embed unpacker. mkissa.to's
+own hosts were separately checked for the same HTTP/2-only pattern (not assumed just
+because AnimePahe had it) — resolved differently per-host, see each provider's own
+section below for specifics if this doc gets updated further.
+
+Operational note: Byparr spawns real Camoufox (Firefox-based) browser instances per cold
+solve, which can leave **zombie child processes** (`Socket Process`, `RDD Process`,
+`Utility Process` — Chromium/Firefox-internal subprocess types) accumulating over hours of
+heavy use if not cleanly reaped — this contributed to a real VM-wide memory/CPU incident
+during the build session. Mitigated with a Docker memory cap
+(`docker update --memory=3g --memory-swap=3g flaresolverr` — the container is kept under
+that name for drop-in compatibility) and a scheduled `docker restart flaresolverr` cron
+job (every 12h) as a periodic cleanup. The underlying zombie-accumulation behavior itself
+was not fixed at the Byparr level, only capped in blast radius.
+
+---
+
 Living doc for candidate anime sites: what each uses, how far we've gotten, and
 what's next. Tested anime for the new batch: **Re:Zero Season 4** (some checks
 used `naruto`/`rezero` side stories). Keep this updated as sites are built.
@@ -47,9 +125,9 @@ Built: `src/providers/anime/animenosub.ts` + extractors `megaplay.ts` (had it),
 | anineko.to | soft (200) | hianime-style clone | ✅ all browser-free | HD-1, HD-2, StreamHG, Earnvids, Doodstream | ✅ **DONE** |
 | anikototv.to | soft (200) | zoro/hianime clone on **nekostream** backend | ✅ `/search?keyword=` (browser-free) | HD-1=megaplay (soft EN subs), VidPlay/Vidstream/VidCloud, Kiwi-Stream=vibeplayer | ✅ **DONE** |
 | reanime.to | soft (200) | **SvelteKit** + REST API | ✅ `/api/v1/search?q=` (browser-free) | HD-2 = flixcloud.cc | ✅ **DONE & PLAYABLE** (crack + curl-impersonate proxy; in aggregator) |
-| mkissa.to/anime | ⛔ via backend | **SvelteKit SPA = AllAnime frontend** | client calls `api.allanime.day` directly (no server proxy) | AllAnime: Luf-Mp4, Vn-Hls, Uni, Ok… | ⛔ **SKIP** — AllAnime is CF JS-challenge gated (needs a browser) |
-| anidb.app | ⛔ HARD (403 "Just a moment") | unknown (gated) | needs browser | UI only exposes AUDIO eng/jpn; servers hidden | LOW |
-| senshi.live | soft (200) | SPA, "New Website" (near-empty) | none in static HTML | Hard Sub: Server 1, DUB: Server 1 | LOW |
+| mkissa.to/anime | ⛔→✅ **DONE (see correction at top of doc)** | **SvelteKit SPA = AllAnime frontend** | client calls `api.allanime.day` directly (no server proxy) | AllAnime: Luf-Mp4, Vn-Hls, Uni, Ok… | ✅ **DONE** — see top-of-doc correction; the CF blocker below was real but is now cleared via Byparr |
+| anidb.app | ⛔→✅ **DONE (see correction at top of doc)** | unknown (gated) | needs browser | UI only exposes AUDIO eng/jpn; servers hidden | ✅ **DONE** — genuinely multi-server, real independent host; the "content indexing service" disclaimer on the live site turned out to be false, see full build notes elsewhere |
+| senshi.live | soft (200) | SPA, "New Website" (near-empty) | none in static HTML | Hard Sub: Server 1, DUB: Server 1 | ✅ **DONE** — reverse-engineered live, real REST API, genuinely multi-server, both sub+dub fully playable |
 
 ### anineko.to — ✅ DONE (commit 94cf660) — the SOFT-SUBTITLE win
 Fully **browser-free** once you use the right URL. Built `src/providers/anime/anineko.ts`
@@ -159,7 +237,19 @@ Verified e2e: decrypts to a valid signed `master.m3u8`. The exact pipeline:
   (real server + curl_cffi shim): master/variant playlists 200+deobfuscated, TS segment
   200 (133 KB, `0x47`), `.ass` sub 200.
 
-### mkissa.to — ⛔ SKIP (it's an AllAnime client-side frontend)
+### mkissa.to — ✅ DONE (2026-07-13) — SUPERSEDES the "⛔ SKIP" verdict below
+**This site's diagnosis below was accurate at the time — the CF blocker was real and
+correctly identified.** What changed: Byparr (a maintained FlareSolverr-compatible
+headless-browser solver, not available/considered when this was first written) was
+deployed and confirmed able to clear AllAnime's exact Cloudflare Managed Challenge tier.
+`mkissa.ts` reuses the shared `cf-solver.ts` (built generic for AnimePahe, confirmed
+working here unmodified) and is verified end-to-end with real playable video for both
+sub and dub. See the top-of-doc correction section for the full build summary. The
+technical analysis below (AllAnime backend, decoy endpoints, the real
+`api.allanime.day` GraphQL API) remains accurate and was the actual reference used to
+build the real provider — only the "can't get past Cloudflare" conclusion is superseded.
+
+**Original diagnosis (accurate at the time, kept for reference):**
 Recon'd (this session). mkissa.to is a **SvelteKit SPA that is just a skin over AllAnime**
 — the server names (Luf-Mp4, Vn-Hls, Uni, Ok) are AllAnime's, and the bundle's real config
 is `Le = "https://api.allanime.day/api"` (GraphQL: `shows`/`episode`/`sourceUrls`/
@@ -181,11 +271,34 @@ is `Le = "https://api.allanime.day/api"` (GraphQL: `shows`/`episode`/`sourceUrls
   source-link decode (hex `--`-prefix → XOR 56 → `/apivtwo/clock` → links) is the easy part;
   the CF gate is the hard part.
 
+### anidb.app — ✅ DONE (2026-07-13) — SUPERSEDES the "LOW/hard-gated" verdict below
+**Genuinely multi-server, real independent host** (`hls.anidb.app`) — one server per
+audio language (Japanese/English), resolved in parallel. Its metadata layer IS
+Cloudflare-TLS-gated as noted below, but is cleared via `curl-impersonate` (not a
+headless browser — this is a TLS/JA3 fingerprint gate, not a full JS/Turnstile
+challenge, a meaningfully lighter problem than AnimePahe/mkissa.to's Managed Challenge).
+`anidb.app`'s own site footer claims to be a "content indexing service" that doesn't
+host video — **confirmed FALSE** by tracing an actual video request end-to-end: no
+third-party embed appears anywhere in the real chain, only `anidb.app`/`hls.anidb.app`
+hosts are ever touched. Treat that disclaimer as DMCA-liability boilerplate, not an
+accurate technical description. `.xls`-disguised segments (real MPEG-TS, fake
+extension) are handled correctly by the already-extension-agnostic `/proxy`.
+
+**Original assessment below (accurate observation — 403 "Just a moment" — but the
+conclusion "needs browser" undersold it; curl-impersonate alone turned out to suffice):**
 ### anidb.app — LOW (hard-gated)
 - Homepage = **403 Cloudflare "Just a moment"** → needs cloakbrowser even to load.
 - User reports the UI only shows an AUDIO english/japanese toggle; servers hidden.
 - **Next:** only worth it if a unique catalog; revisit with cloakbrowser.
 
+### senshi.live — ✅ DONE (2026-07-13) — SUPERSEDES the "LOW/looks empty" note below
+Turned out to be a real, healthy React/Vite SPA with a plain JSON REST API — no anti-bot
+at all on any path. Genuinely multi-server per audio type, both sub and dub fully
+playable (not a metadata-only phantom). One real caveat: subtitles are burned-in
+hardsubs, no separate soft `.vtt` track. The "looks new/near-empty" read below was based
+on an incomplete initial look — a full from-scratch build found a real, working site.
+
+**Original note (superseded):**
 ### senshi.live — LOW (looks new/empty)
 - "New Website", no catalog in static HTML, single "Server 1". Likely early-stage.
 - **Next:** recheck later; not worth building now.
