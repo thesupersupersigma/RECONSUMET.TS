@@ -10,7 +10,11 @@
 //   RATE_LIMIT_PROXY       per-IP/min for /proxy, default 600. One video fires hundreds of segment
 //                          requests, so this tier is deliberately high; 0 disables (exempts) it.
 //   RATE_LIMIT_WINDOW      rate-limit window in seconds (default 60)
-//   RATE_LIMIT_TRUST_PROXY trust X-Forwarded-For for client IP (default true; needed behind CF / SSR frontends)
+//   RATE_LIMIT_TRUST_PROXY which proxies to trust when reading X-Forwarded-For for the client IP.
+//                          'true' (default) trusts loopback+private ranges (our Traefik hop) — do
+//                          NOT set to a value that trusts the whole chain; 'false' keys on the raw
+//                          socket IP; a comma list of CIDRs/IPs trusts exactly those (e.g. an
+//                          external SSR frontend). See RL_TRUST_PROXY for why 'true' != trust-all.
 //   API_KEY                if set, /search /info /episodes /watch require it (x-api-key or Bearer). OFF by default.
 //   DEBUG_INFO             if "1"/"true", the / route also exposes TLS-impersonation diagnostics (off by default)
 //   HTTP_TIMEOUT_MS        (consumet lib) AniList/provider axios timeout (ms, default 20000)
@@ -61,7 +65,25 @@ const TLS_HOSTS = (process.env.TLS_IMPERSONATE_HOSTS || 'flixcloud.cc,overcdn.si
 
 // --- rate limiting (tiered, in-memory) + optional API key ---
 const RL_WINDOW_MS = (Number(process.env.RATE_LIMIT_WINDOW) || 60) * 1000;
-const RATE_LIMIT_TRUST_PROXY = (process.env.RATE_LIMIT_TRUST_PROXY ?? 'true').toLowerCase() !== 'false';
+// Which upstream proxies to trust when resolving the client IP from X-Forwarded-For.
+// SECURITY: must NOT be `true`. Fastify's `trustProxy: true` trusts the ENTIRE client-supplied
+// XFF chain, so req.ip becomes the left-most (caller-controlled) entry — any external client can
+// then forge/rotate their IP: rotate a fake IP per request to get a fresh rate-limit bucket every
+// time, or send a private IP to hit the internal-worker exemption below. Both fully defeat the
+// limiter (verified: rotating XFF let a burst sail straight through to AniList unthrottled).
+// We front the API with exactly one proxy (Traefik) on the private Docker network, so we trust
+// only loopback + private ranges. proxy-addr then walks [socket, …XFF] and returns the first
+// address OUTSIDE those ranges — i.e. the real public IP Traefik observed — ignoring anything the
+// caller injected to its left. Value forms (RATE_LIMIT_TRUST_PROXY):
+//   'true' (default) → trust loopback + private ranges (our proxy) — the secure default.
+//   'false'          → trust nothing; key on the raw socket IP (only correct with NO proxy).
+//   comma list       → explicit CIDRs/IPs (e.g. add a known external SSR frontend's IP).
+const RL_TRUST_RAW = (process.env.RATE_LIMIT_TRUST_PROXY ?? 'true').trim();
+const RL_TRUST_PROXY = /^false$/i.test(RL_TRUST_RAW)
+  ? false
+  : /^true$/i.test(RL_TRUST_RAW)
+    ? ['loopback', 'linklocal', 'uniquelocal']
+    : RL_TRUST_RAW.split(',').map(s => s.trim()).filter(Boolean);
 const RL_TIERS = {
   default: Number(process.env.RATE_LIMIT_MAX ?? 120),
   scrape: Number(process.env.RATE_LIMIT_SCRAPE ?? 60),
@@ -71,9 +93,10 @@ const RL_TIERS = {
 const API_KEY = process.env.API_KEY || ''; // OFF by default — set to require auth on data routes
 const DEBUG_INFO = /^(1|true)$/i.test(process.env.DEBUG_INFO || '');
 
-// trustProxy: behind Cloudflare / an SSR frontend the socket IP is the proxy's; trust
-// X-Forwarded-For so rate limiting keys on the real client IP (toggle via RATE_LIMIT_TRUST_PROXY).
-const app = Fastify({ logger: true, trustProxy: RATE_LIMIT_TRUST_PROXY });
+// trustProxy scoped to our own proxy hop (see RL_TRUST_PROXY above): the socket IP is Traefik's,
+// so we resolve the real client IP from X-Forwarded-For for per-IP keying — but only trusting
+// our proxy's ranges, so a caller can't forge req.ip by injecting XFF entries.
+const app = Fastify({ logger: true, trustProxy: RL_TRUST_PROXY });
 // CORS '*' is INTENTIONAL: a public, read-only metadata/stream API called from arbitrary
 // frontends; no cookies/credentials are used. Tighten only if you add origin-dependent auth.
 await app.register(cors, { origin: '*' });
