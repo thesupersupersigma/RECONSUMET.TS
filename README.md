@@ -138,6 +138,28 @@ array of every server that provider offers** for that audio type, ordered with t
 default/auto-play server first. `sources[].url` / `subtitles[].url` are pre-wrapped
 through `/proxy` and ready for `hls.js`/`<video>`; `rawUrl` is the original upstream URL.
 
+**`episodeId` is provider-specific, not a universal identifier — always get it from
+`/episodes`, don't guess it.** Each source addresses its own episodes with its own
+internal scheme: AniNeko uses `<slug>/ep-<n>`, ReAnime uses `<anilistId>/<episodeNumber>`,
+AnikotoTV uses a raw numeric ID from its own backend, and so on — there's no shared
+format across providers, because each one's video is ultimately addressed by *that
+site's* own system, not by AniList's episode numbering. `/search` and `/info` DO
+normalize around a single universal identifier (the AniList id) because that's a
+show-level concept every provider can be matched against by title — but at the episode
+level, that universality breaks down, since AniList doesn't know or care how any given
+provider numbers its own episodes internally.
+
+This is a deliberate tradeoff, not an oversight: `/watch` could look up the right
+episodeId itself given just an AniList id + episode number (calling `/episodes`
+internally on every request), but that would mean paying the cost of a fresh
+episode-list fetch on every single `/watch` call — even for a caller who already knows
+exactly which episode they want and has already done that lookup once. The current
+design optimizes for "do the discovery once via `/episodes`, then make fast, direct
+`/watch` calls after that" over "every call is maximally convenient but repeats work."
+A smart client (like this project's own front-end) does the `/info` → `/episodes` →
+`/watch` chain once per title and reuses the result, rather than re-resolving on every
+request.
+
 ### `GET /proxy?url=<encoded>&ref=<encoded>&...`
 The streaming proxy (you normally don't call this directly — `/watch` builds the links).
 Injects `Referer`/`Origin`, rewrites HLS playlists so children also route through the
