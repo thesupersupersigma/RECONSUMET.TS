@@ -265,13 +265,22 @@ class AniNeko extends AnimeParser {
     // as the primary signal; the vtt `_dub_`/`_sub_` heuristic is only a fallback for pages
     // that lack the tabs. (`hsub` hardsub and `sub` softsub both count as `sub`.)
     const tabType = new Map<string, 'sub' | 'dub'>();
+    // raw `data-id` per tab (`hsub` | `sub` | `dub`) — needed on top of `tabType` because
+    // `hsub` and `sub` both bucket to `type: 'sub'`, but they're separate tabs that can each
+    // contribute a same-named server (e.g. both offer an "HD-1"); we need the raw id to tell
+    // those two apart for the Hard Sub/Soft Sub disambiguation below.
+    const tabRawId = new Map<string, string>();
     $('.nv-server-tab').each((_i, el) => {
       const tabKey = ($(el).attr('class') ?? '').split(/\s+/).find(c => /^tab_\d+$/.test(c));
       const dataId = ($(el).attr('data-id') ?? '').trim().toLowerCase();
-      if (tabKey && dataId) tabType.set(tabKey, dataId === 'dub' ? 'dub' : 'sub');
+      if (tabKey && dataId) {
+        tabType.set(tabKey, dataId === 'dub' ? 'dub' : 'sub');
+        tabRawId.set(tabKey, dataId);
+      }
     });
 
     const servers: NekoServer[] = [];
+    const rawIds: string[] = []; // parallel to `servers`, holds each entry's raw tab id
     $('[data-video]').each((_i, el) => {
       const video = $(el).attr('data-video');
       if (!video) return;
@@ -284,8 +293,9 @@ class AniNeko extends AnimeParser {
       // the English .vtt rides in one of several query params, depending on host
       const params = new URL(video).searchParams;
       const subtitle = params.get('sub') ?? params.get('caption_1') ?? params.get('c1_file') ?? undefined;
+      const tabKey = ($(el).attr('data-tab') ?? '').trim();
       // primary: the server tab's data-id; fallback: legacy vtt-name heuristic
-      const tabbed = tabType.get(($(el).attr('data-tab') ?? '').trim());
+      const tabbed = tabType.get(tabKey);
       const type: 'sub' | 'dub' = tabbed ?? (/_dub_eng|_dub_/i.test(subtitle ?? '') ? 'dub' : 'sub');
       servers.push({
         name: $(el).text().trim().slice(0, 24) || host,
@@ -295,7 +305,20 @@ class AniNeko extends AnimeParser {
         soft: !!subtitle && /_sub_eng|_sub_/i.test(subtitle),
         subtitle,
       });
+      rawIds.push(tabRawId.get(tabKey) ?? '');
     });
+
+    // Disambiguate name collisions caused by the Hard Sub and Soft Sub tabs offering a
+    // server under the same label (e.g. both tabs have an "HD-1"). Only suffix when a name
+    // actually collides across those two tabs — a title with just one sub-flavored tab (or a
+    // name that isn't duplicated) keeps its plain, unsuffixed name.
+    const hsubNames = new Set(servers.filter((s, i) => rawIds[i] === 'hsub').map(s => s.name));
+    const subNames = new Set(servers.filter((s, i) => rawIds[i] === 'sub').map(s => s.name));
+    servers.forEach((s, i) => {
+      if (rawIds[i] === 'hsub' && subNames.has(s.name)) s.name = `${s.name} (Hard Sub)`;
+      else if (rawIds[i] === 'sub' && hsubNames.has(s.name)) s.name = `${s.name} (Soft Sub)`;
+    });
+
     return servers;
   };
 }
