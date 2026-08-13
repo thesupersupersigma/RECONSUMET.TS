@@ -28,10 +28,25 @@ ENV CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 
 WORKDIR /app
 
-# Build consumet library first
+# Build consumet library first.
+# tsc EMITS dist/ despite errors (tsconfig has no noEmitOnError), so we let it run, then GATE on the
+# output: fail the build on any error OUTSIDE the known pre-existing baseline (rabbit.ts x1 +
+# anilist.ts x11 = 12), and on any growth beyond that count. This is what `|| true` used to hide —
+# most importantly a TS2307 module-not-found (a renamed/broken import) that would otherwise ship a
+# stale dist/ and only crash at runtime. `tee` keeps the pipeline exit 0 so the RUN reaches the gate.
 COPY consumet/ ./consumet/
 WORKDIR /app/consumet
-RUN pnpm install --ignore-scripts && npx tsc || true
+RUN pnpm install --ignore-scripts && \
+    npx tsc -p tsconfig.json 2>&1 | tee /tmp/tsc.log; \
+    UNEXPECTED="$(grep -E 'error TS' /tmp/tsc.log | grep -vE 'src/extractors/rabbit\.ts|src/providers/meta/anilist\.ts' || true)"; \
+    TOTAL="$(grep -cE 'error TS' /tmp/tsc.log || true)"; \
+    if [ -n "$UNEXPECTED" ]; then \
+      echo '=== BUILD FAILED: TypeScript errors outside the known baseline ==='; echo "$UNEXPECTED"; exit 1; \
+    fi; \
+    if [ "${TOTAL:-0}" -gt 12 ]; then \
+      echo "=== BUILD FAILED: ${TOTAL} tsc errors > 12 known baseline (new errors in rabbit.ts/anilist.ts) ==="; cat /tmp/tsc.log; exit 1; \
+    fi; \
+    echo "tsc gate OK: ${TOTAL:-0} error(s), all within the known rabbit.ts/anilist.ts baseline"
 
 # Install API
 WORKDIR /app
