@@ -1,4 +1,5 @@
 import { VideoExtractor, IVideo, ISubtitle } from '../models';
+import { unpackPacker } from '../utils/unpack-packer';
 
 class StreamHub extends VideoExtractor {
   protected override serverName = 'StreamHub';
@@ -15,9 +16,11 @@ class StreamHub extends VideoExtractor {
         throw new Error('Video not found');
       });
 
-      const unpackedData = eval(/(eval)(\(f.*?)(\n<\/script>)/s.exec(data)![2].replace('eval', ''));
+      // StreamHub's page is third-party: expand its packed script as data, never execute it.
+      const unpackedData = unpackPacker(data, videoUrl.href);
 
       const links = unpackedData.match(new RegExp('sources:\\[\\{src:"(.*?)"')) ?? [];
+      if (!links[1]) throw new Error(`no source link found in unpacked StreamHub embed: ${videoUrl.href}`);
       const m3u8Content = await this.client.get(links[1], {
         headers: {
           Referer: links[1],

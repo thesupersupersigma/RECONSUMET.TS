@@ -1,6 +1,7 @@
 import { load } from 'cheerio';
 
 import { MangaParser, ISearch, IMangaInfo, IMangaResult, MediaStatus, IMangaChapterPage } from '../../models';
+import { unpackPacker, unpackJsStringConcat } from '../../utils/unpack-packer';
 
 class MangaHere extends MangaParser {
   override readonly name = 'MangaHere';
@@ -81,10 +82,8 @@ class MangaHere extends MangaParser {
       const bar = $('script[src*=chapter_bar]').data();
       const html = $.html();
       if (typeof bar !== 'undefined') {
-        const ss = html.indexOf('eval(function(p,a,c,k,e,d)');
-        const se = html.indexOf('</script>', ss);
-        const s = html.substring(ss, se).replace('eval', '');
-        const ds = eval(s) as string;
+        // mangahere's page is third-party: expand its packed script as data, never execute it.
+        const ds = unpackPacker(html, url);
 
         const urls = ds.split("['")[1].split("']")[0].split("','");
 
@@ -125,7 +124,8 @@ class MangaHere extends MangaParser {
             else sKey = '';
           }
 
-          const ds = eval(resText.replace('eval', ''));
+          // chapterfun.ashx answers with a packed script; expand it as data.
+          const ds = unpackPacker(resText, pageLink);
 
           const baseLinksp = ds.indexOf('pix=') + 5;
           const baseLinkes = ds.indexOf(';', baseLinksp) - 1;
@@ -186,18 +186,19 @@ class MangaHere extends MangaParser {
    *  credit: [tachiyomi-extensions](https://github.com/tachiyomiorg/tachiyomi-extensions/blob/master/src/en/mangahere/src/eu/kanade/tachiyomi/extension/en/mangahere/Mangahere.kt)
    */
   private extractKey = (html: string) => {
-    const skss = html.indexOf('eval(function(p,a,c,k,e,d)');
-    const skse = html.indexOf('</script>', skss);
-    const sks = html.substring(skss, skse).replace('eval', '');
-
-    const skds = eval(sks);
+    // Two evals used to live here, both on page-controlled text. First the packed key script…
+    const skds = unpackPacker(html, `${this.baseUrl} chapter key script`);
 
     const sksl = skds.indexOf("'");
     const skel = skds.indexOf(';');
 
+    // …then the key itself, which the unpacked script builds as a concatenation of string literals
+    // (`''+'e'+'8'+…`). That second eval is NOT a packer, so it does not go through unpackPacker:
+    // it gets a parser that accepts quoted literals joined by `+` and throws on anything else,
+    // rather than executing whatever expression the page happens to contain.
     const skrs = skds.substring(sksl, skel);
 
-    return eval(skrs) as string;
+    return unpackJsStringConcat(skrs, `${this.baseUrl} chapter key`);
   };
 }
 

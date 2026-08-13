@@ -1,4 +1,5 @@
 import { VideoExtractor, IVideo } from '../models';
+import { unpackPacker } from '../utils/unpack-packer';
 
 class Kwik extends VideoExtractor {
   protected override serverName = 'kwik';
@@ -12,9 +13,10 @@ class Kwik extends VideoExtractor {
         headers: { Referer: this.host },
       });
 
-      const source = eval(/(eval)(\(f.*?)(\n<\/script>)/s.exec(data)![2].replace('eval', '')).match(
-        /https.*?m3u8/
-      );
+      // The embed page is kwik's, not ours: expand its packed script as data. `eval`-ing it (what
+      // this used to do) handed a third party arbitrary code execution in this process.
+      const source = unpackPacker(data, videoUrl.href).match(/https.*?m3u8/);
+      if (!source) throw new Error(`no m3u8 found in unpacked kwik embed: ${videoUrl.href}`);
 
       this.sources.push({
         url: source[0],
