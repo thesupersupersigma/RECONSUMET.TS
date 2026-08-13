@@ -10,6 +10,7 @@
     "lint": "prettier --write .",
     "prepare": "husky || true",
     "test": "jest",
+    "test:unit": "node --test 'test/**/*.test.mjs'",
     "test:anime": "jest ./test/anime",
     "test:books": "jest ./test/books/libgen.test.ts",
     "test:comics": "jest ./test/comics",
