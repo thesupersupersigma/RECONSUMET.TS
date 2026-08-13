@@ -1,0 +1,15 @@
+# Keep the developer's working tree out of the image.
+#
+# Without this, `COPY consumet/ ./consumet/` copied the LOCAL dist/ into the image. Combined with the
+# old `npx tsc || true`, a build whose compile failed still shipped — running whatever dist/ happened
+# to be lying around on the machine that built it. That is precisely the "stale dist/ with nobody
+# noticing" failure H2 is about, so the build must always compile its own dist/ from the copied src/.
+# node_modules is excluded for the same reason (host-arch native binaries + a stale tree): the build
+# runs its own `pnpm install` in both consumet/ and api/. Lockfiles and package.json are NOT ignored.
+**/node_modules
+**/dist
+**/build
+
+.git
+.gitignore
+*.log

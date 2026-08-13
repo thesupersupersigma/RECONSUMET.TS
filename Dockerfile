@@ -28,25 +28,15 @@ ENV CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 
 WORKDIR /app
 
-# Build consumet library first.
-# tsc EMITS dist/ despite errors (tsconfig has no noEmitOnError), so we let it run, then GATE on the
-# output: fail the build on any error OUTSIDE the known pre-existing baseline (rabbit.ts x1 +
-# anilist.ts x11 = 12), and on any growth beyond that count. This is what `|| true` used to hide —
-# most importantly a TS2307 module-not-found (a renamed/broken import) that would otherwise ship a
-# stale dist/ and only crash at runtime. `tee` keeps the pipeline exit 0 so the RUN reaches the gate.
+# Build consumet library first. `npx tsc || true` used to swallow every compile error; the build now
+# runs through scripts/build-gate.sh, which fails on anything outside the 12 known pre-existing
+# errors (rabbit.ts x1 + anilist.ts x11), on a tsc that dies without reporting one, and on a dist/
+# this build didn't emit. See that script's header for the full rationale.
+# NOTE: the whole RUN is a single `&&` chain on purpose — a `;` here would let a failed install fall
+# through into the gate, which is how the previous version could still "pass" with no node_modules.
 COPY consumet/ ./consumet/
 WORKDIR /app/consumet
-RUN pnpm install --ignore-scripts && \
-    npx tsc -p tsconfig.json 2>&1 | tee /tmp/tsc.log; \
-    UNEXPECTED="$(grep -E 'error TS' /tmp/tsc.log | grep -vE 'src/extractors/rabbit\.ts|src/providers/meta/anilist\.ts' || true)"; \
-    TOTAL="$(grep -cE 'error TS' /tmp/tsc.log || true)"; \
-    if [ -n "$UNEXPECTED" ]; then \
-      echo '=== BUILD FAILED: TypeScript errors outside the known baseline ==='; echo "$UNEXPECTED"; exit 1; \
-    fi; \
-    if [ "${TOTAL:-0}" -gt 12 ]; then \
-      echo "=== BUILD FAILED: ${TOTAL} tsc errors > 12 known baseline (new errors in rabbit.ts/anilist.ts) ==="; cat /tmp/tsc.log; exit 1; \
-    fi; \
-    echo "tsc gate OK: ${TOTAL:-0} error(s), all within the known rabbit.ts/anilist.ts baseline"
+RUN pnpm install --ignore-scripts && sh scripts/build-gate.sh
 
 # Install API
 WORKDIR /app
