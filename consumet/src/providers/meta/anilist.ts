@@ -42,6 +42,22 @@ import {
 import Gogoanime from '../../providers/anime/gogoanime';
 import Mangasee123 from '../manga/mangasee123';
 import { ANIFY_URL, compareTwoStrings, getHashFromImage } from '../../utils/utils';
+import { graphqlErrorsSummary, safeErrorString } from '../../utils/cf-solver';
+
+/**
+ * AniList rate-limiting comes back as **HTTP 200 with a populated `errors[]`** and null data.
+ * Left unlogged, that degrades into "every provider found nothing" and misdirects diagnosis
+ * toward the providers when the real fault is upstream metadata. Log-only: never throws,
+ * never changes what callers receive.
+ */
+const logUpstreamGraphqlErrors = (data: unknown, context: string): void => {
+  const summary = graphqlErrorsSummary(data);
+  if (summary)
+    console.error(
+      `[anilist] ${context}: AniList returned HTTP 200 with populated errors[] — UPSTREAM AniList fault ` +
+        `(likely rate limiting), NOT a provider fault: ${summary}`
+    );
+};
 
 class Anilist extends AnimeParser {
   override readonly name = 'Anilist';
@@ -95,6 +111,7 @@ class Anilist extends AnimeParser {
         validateStatus: () => true,
       });
 
+      logUpstreamGraphqlErrors(data, `search("${query}") [HTTP ${status}]`);
       if (status >= 500 || status == 429)
         throw new Error('Anilist is down or you are being rate-limited. Please try again later.');
 
@@ -243,6 +260,7 @@ class Anilist extends AnimeParser {
         validateStatus: () => true,
       });
 
+      logUpstreamGraphqlErrors(data, `advancedSearch(query: "${query ?? ''}", id: ${id ?? 'n/a'}) [HTTP ${status}]`);
       if (status >= 500 && !query) throw new Error('No results found');
       if (status >= 500)
         throw new Error('Anilist is down or you are being rate-limited. Please try again later.');
@@ -362,6 +380,7 @@ class Anilist extends AnimeParser {
         validateStatus: () => true,
       });
 
+      logUpstreamGraphqlErrors(data, `fetchAnimeInfo(${id}) [HTTP ${status}]`);
       if (status == 404)
         throw new Error('Media not found. Perhaps the id is invalid or the anime is not in anilist');
       if (status == 429) throw new Error('You have been ratelimited by anilist. Please try again later');
@@ -763,7 +782,11 @@ class Anilist extends AnimeParser {
           try {
             possibleAnime = await this.provider.fetchAnimeInfo(possibleSource.url.split('/').pop()!);
           } catch (err) {
-            console.error(err);
+            console.error(
+              `[anilist] provider ${this.provider.name}: fetchAnimeInfo("${possibleSource.url.split('/').pop()}") ` +
+                `for AniList id ${anilistId} (malId ${malId}, title "${title}") FAILED — falling back to raw ` +
+                `title search: ${safeErrorString(err)}`
+            );
             possibleAnime = await this.findAnimeRaw(slug);
           }
         } else possibleAnime = await this.findAnimeRaw(slug);
@@ -1356,11 +1379,15 @@ class Anilist extends AnimeParser {
       query: `query($id: Int = ${id}){ Media(id: $id){ idMal externalLinks { site url } title { romaji english } status season episodes startDate { year month day } endDate { year month day }  coverImage {extraLarge large medium} } }`,
     };
 
+    const response = await this.client.post(this.anilistGraphqlUrl, options);
+    // log the upstream errors[] case BEFORE the destructure below throws its opaque TypeError on
+    // null data — same failure surfaced to callers, but now with the real cause on record.
+    logUpstreamGraphqlErrors(response.data, `fetchEpisodesListById(${id})`);
     const {
       data: {
         data: { Media },
       },
-    } = await this.client.post(this.anilistGraphqlUrl, options);
+    } = response;
 
     let possibleAnimeEpisodes: IAnimeEpisode[] = [];
     let fillerEpisodes: { number: string; 'filler-bool': boolean }[] = [];
@@ -1423,9 +1450,16 @@ class Anilist extends AnimeParser {
     };
 
     try {
-      const { data } = await this.client.post(this.anilistGraphqlUrl, options).catch(() => {
+      const { data } = await this.client.post(this.anilistGraphqlUrl, options).catch(err => {
+        // callers still see the same 'Media not found' — but log the REAL cause first (this used
+        // to swallow rate limits / network faults and rebrand them all as a missing id).
+        console.error(
+          `[anilist] fetchAnilistInfoById(${id}): AniList GraphQL request FAILED (real cause below; ` +
+            `degrading to 'Media not found'): ${safeErrorString(err)}`
+        );
         throw new Error('Media not found');
       });
+      logUpstreamGraphqlErrors(data, `fetchAnilistInfoById(${id})`);
       animeInfo.malId = data.data.Media.idMal;
       animeInfo.title = {
         romaji: data.data.Media.title.romaji,
@@ -1935,8 +1969,15 @@ class Anilist extends AnimeParser {
 
       try {
         const { data } = await axios.post(new Anilist().anilistGraphqlUrl, options).catch(err => {
+          // same contract as before ('Media not found') — but the REAL cause is logged first
+          // instead of being silently discarded.
+          console.error(
+            `[anilist] Manga.fetchMangaInfo(${id}): AniList GraphQL request FAILED (real cause below; ` +
+              `degrading to 'Media not found'): ${safeErrorString(err)}`
+          );
           throw new Error('Media not found');
         });
+        logUpstreamGraphqlErrors(data, `Manga.fetchMangaInfo(${id})`);
         mangaInfo.malId = data.data.Media.idMal;
         mangaInfo.title = {
           romaji: data.data.Media.title.romaji,

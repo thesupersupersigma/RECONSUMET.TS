@@ -9,6 +9,7 @@ import {
   IAnimeEpisode,
   IEpisodeServer,
   ISource,
+  ISubtitle,
   ITitle,
   IVideo,
   StreamingServers,
@@ -23,8 +24,12 @@ import { CloudflareSolver } from '../../utils/cf-solver';
 interface MkissaSource {
   /** friendly server label used as `serverName` (e.g. `Mp4`, `Sw`, `Ss-Hls`) */
   name: string;
-  /** the resolved playable stream (direct mp4/HLS) */
+  /** the resolved playable stream (direct mp4/HLS) — best/first of {@link videos}. */
   video: IVideo;
+  /** all resolved qualities/variants (the internal `clock` link yields several); primary is `video`. */
+  videos?: IVideo[];
+  /** soft subtitles the source carries (the internal `clock` link exposes these directly). */
+  subtitles?: ISubtitle[];
   /** headers the CDN needs (e.g. the embed host's Referer) */
   headers: Record<string, string>;
   /** AllAnime priority (higher = better); used to order servers */
@@ -86,9 +91,21 @@ interface AllAnimeSourceUrl {
  *   `sha256("Xot36i3lK3:v1")` fallback key is dead — it now fails GCM authentication outright.
  * - **Obfuscated source URLs.** Each `sourceUrls[].sourceUrl` is either a third-party embed
  *   (`https://…`) or an internal link prefixed `--` whose hex bytes are XOR-0x38 (`--` → `/apivtwo/
- *   clock?id=…`). We resolve the embeds — mp4upload/streamwish/streamsb/filemoon/voe/vidmoly all have
- *   extractors in this repo — and rank them by AllAnime's `priority`. (The internal `clock` endpoint
- *   currently 500s server-side, so internal links are skipped in favour of the embeds.)
+ *   clock?id=…`, or the sibling `/apivtwo/vidcdn?id=…` etc). We resolve the embeds
+ *   (mp4upload/streamwish/vidmoly… have extractors here) AND the internal links, ranking by health
+ *   then AllAnime `priority`. For DMCA'd titles the third-party embeds are frequently dead
+ *   (streamsb/streamlare no longer resolve, mp4upload serves a 16-byte deleted-file stub, ok.ru is
+ *   copyright-blocked) and the internal link is the only playable server — so it is now RESOLVED, not
+ *   skipped. See {@link resolveClockLink}: the endpoint never moved, the previous decode simply never
+ *   built the correct URL — the live player fetches `<decoded>.replace(/\?id=/,'.json?id=')` (i.e.
+ *   `/apivtwo/clock.json?id=…`) and reads plain JSON `{links:[{portData:{streams:[{url,format}]},link,
+ *   subtitles}]}`. There is NO second XOR-0x06 layer in the current pipeline (that decode is dead).
+ *
+ *   IMPORTANT: the internal endpoint lives on the **site origin `allanime.day`, NOT the GraphQL host
+ *   `api.allanime.day`**. `allanime.day/apivtwo/clock.json` answers over plain HTTP with no Cloudflare
+ *   challenge (a bogus id → HTTP 500 `error`, i.e. the route is live), whereas
+ *   `api.allanime.day/apivtwo/clock.json` returns Cloudflare's `Just a moment…` (403). So the clock
+ *   fetch uses {@link Mkissa.CLOCK_ORIGIN} via the plain `client` — it does **not** need the solver.
  *
  * Resolution chain:
  * - Search:   `GET /api?variables=…&query=<shows query>`         → `{data:{shows:{edges:[{_id,name,
@@ -108,6 +125,23 @@ class Mkissa extends AnimeParser {
 
   /** the frontend origin the API expects as Referer. */
   private static readonly SITE_REFERER = 'https://mkissa.to';
+  /**
+   * AllAnime's **site** origin (the player iframe's origin), where the internal `--` links resolve —
+   * `/apivtwo/clock.json?id=…` and siblings. Distinct from {@link baseUrl} (`api.allanime.day`, the
+   * Cloudflare-gated GraphQL host): this origin answers `/apivtwo/*.json` over plain HTTP with no
+   * challenge, so the clock fetch goes through the ordinary `client`, not the solver.
+   */
+  private static readonly CLOCK_ORIGIN = 'https://allanime.day';
+  /**
+   * Embed hosts whose in-repo extractor is currently broken/dead (see {@link EMBED_EXTRACTORS}) —
+   * StreamSB (hardcoded dead hosts), Filemoon (`extract` throws "not implemented"), VOE (page format
+   * changed → regex miss → throw). Not removed (they occasionally still serve some titles), but
+   * ranked below healthy servers so they're only ever tried as a last resort.
+   */
+  private static readonly DEAD_HOSTS = new Set(['streamsb', 'filemoon', 'bysekoze', 'voe']);
+  /** Hosts that resolve but are unreliable (mp4upload serves a 16-byte deleted-file stub for popular
+   *  titles) — ranked between healthy and dead. */
+  private static readonly FLAKY_HOSTS = new Set(['mp4upload']);
   /** quantum the signing token's `ts` is floored to (client: `xm = 5*6e4`). */
   private static readonly TS_QUANTUM_MS = 5 * 60_000;
   /** attempts for a protected op before giving up (covers epoch rotation, APQ eviction, throttling). */
@@ -402,8 +436,14 @@ class Mkissa extends AnimeParser {
     try {
       const candidates = this.orderByPriority(await this.fetchSourceUrls(episodeId, subOrDub));
       for (const candidate of candidates) {
-        const resolved = await this.resolveSource(candidate);
-        if (resolved) return this.toSource(resolved);
+        // A throwing extractor (e.g. Filemoon "not implemented", VOE/Mp4Upload regex null-deref) must
+        // NOT abort the whole loop — a dead top-priority host would otherwise mask working ones below.
+        try {
+          const resolved = await this.resolveSource(candidate);
+          if (resolved) return this.toSource(resolved);
+        } catch {
+          /* skip this server; try the next candidate */
+        }
       }
       throw new Error('no embed server resolved to a playable stream');
     } catch (err) {
@@ -445,7 +485,14 @@ class Mkissa extends AnimeParser {
     subOrDub: 'sub' | 'dub' = 'sub'
   ): Promise<IEpisodeServer[]> => {
     const urls = this.orderByPriority(await this.fetchSourceUrls(episodeId, subOrDub));
-    return urls.map(u => ({ name: u.sourceName || 'server', url: this.embedUrl(u.sourceUrl) }));
+    return urls.map(u => {
+      const decoded = this.embedUrl(u.sourceUrl);
+      return {
+        name: u.sourceName || 'server',
+        // surface the resolvable clock.json URL for internal links (not the raw `/apivtwo/clock?id=`).
+        url: Mkissa.isClockPath(decoded) ? Mkissa.clockJsonUrl(decoded) : decoded,
+      };
+    });
   };
 
   /** flatten `availableEpisodesDetail` (sub, with dub numbers merged in) into an ascending episode list. */
@@ -523,17 +570,54 @@ class Mkissa extends AnimeParser {
     return out;
   };
 
-  /** best server first: highest AllAnime priority, and internal `--` links last (their CDN 500s). */
-  private orderByPriority = (urls: AllAnimeSourceUrl[]): AllAnimeSourceUrl[] =>
-    [...urls].sort((a, b) => {
-      const internal = (u: AllAnimeSourceUrl) => (u.sourceUrl.startsWith('--') ? 1 : 0);
-      return internal(a) - internal(b) || (Number(b.priority) || 0) - (Number(a.priority) || 0);
-    });
+  /** a decoded internal link (`/apivtwo/clock?id=…`, `/apivtwo/vidcdn?id=…`, …) resolvable via clock.json. */
+  private static isClockPath = (decoded: string): boolean => decoded.startsWith('/') && /[?&]id=/.test(decoded);
 
-  /** resolve one source to a playable stream via the matching host extractor, or null if unsupported. */
+  /**
+   * Turn a decoded internal path into the live fetchable URL. Mirrors the frontend player exactly
+   * (`sourceUrl.replace(/\?id=/,'.json?id=')`): `/apivtwo/clock?id=X` → `/apivtwo/clock.json?id=X`,
+   * served from {@link Mkissa.CLOCK_ORIGIN} (the un-gated site origin, not the GraphQL host).
+   */
+  private static clockJsonUrl = (decoded: string): string => {
+    const path = decoded.startsWith('/') ? decoded : `/${decoded}`;
+    return `${Mkissa.CLOCK_ORIGIN}${path.replace(/\?id=/, '.json?id=')}`;
+  };
+
+  /**
+   * Reliability tier for a raw AllAnime `sourceUrl` (higher = tried first):
+   * - `3` — internal `--` link that resolves to a first-party HLS via clock.json (the fallback that
+   *   actually plays when third-party embeds are DMCA-dead).
+   * - `2` — a healthy in-repo extractor host (streamwish / vidmoly / …).
+   * - `1` — a flaky host ({@link FLAKY_HOSTS}, e.g. mp4upload's deleted-file stub).
+   * - `0` — a known-dead host ({@link DEAD_HOSTS}) or one with no extractor at all.
+   */
+  private sourceTier = (u: AllAnimeSourceUrl): number => {
+    const raw = u.sourceUrl || '';
+    if (raw.startsWith('--')) return Mkissa.isClockPath(this.embedUrl(raw)) ? 3 : 0;
+    const embed = raw.startsWith('//') ? `https:${raw}` : raw;
+    const host = Mkissa.EMBED_EXTRACTORS.find(e => embed.includes(e.host))?.host;
+    if (!host || Mkissa.DEAD_HOSTS.has(host)) return 0;
+    if (Mkissa.FLAKY_HOSTS.has(host)) return 1;
+    return 2;
+  };
+
+  /**
+   * Best server first — health BEFORE AllAnime's own `priority`. The prior ordering trusted `priority`
+   * blindly and buried the internal link last; but for DMCA'd titles the high-`priority` embeds are the
+   * dead ones (streamsb/streamlare/ok.ru), so we sort by {@link sourceTier} first and break ties by
+   * `priority`. Resolution is lazy (first candidate that yields a stream wins), so a healthier server is
+   * always attempted ahead of a known-dead one.
+   */
+  private orderByPriority = (urls: AllAnimeSourceUrl[]): AllAnimeSourceUrl[] =>
+    [...urls].sort(
+      (a, b) => this.sourceTier(b) - this.sourceTier(a) || (Number(b.priority) || 0) - (Number(a.priority) || 0)
+    );
+
+  /** resolve one source to a playable stream — internal `--` link via clock.json, else the host extractor. */
   private resolveSource = async (source: AllAnimeSourceUrl): Promise<MkissaSource | null> => {
     const embed = this.embedUrl(source.sourceUrl);
-    if (!/^https?:\/\//i.test(embed)) return null; // internal clock link — unresolved (CDN 500s)
+    if (Mkissa.isClockPath(embed)) return this.resolveClockLink(source, embed);
+    if (!/^https?:\/\//i.test(embed)) return null; // unrecognised internal link
     const match = Mkissa.EMBED_EXTRACTORS.find(e => embed.includes(e.host));
     if (!match) return null;
     // extractors expose `extract` (protected on the abstract base); the concrete ones resolve to IVideo[].
@@ -543,15 +627,93 @@ class Mkissa extends AnimeParser {
     return {
       name: source.sourceName || match.host,
       video: videos[0],
+      videos,
       headers: { Referer: match.referer },
+      priority: Number(source.priority) || 0,
+    };
+  };
+
+  /**
+   * Resolve an internal AllAnime `--` link (already decoded to `/apivtwo/clock?id=…`) by fetching the
+   * live `.json` endpoint and reading its plain-JSON `links[]`. This is the fallback that plays DMCA'd
+   * titles whose third-party embeds are dead.
+   *
+   * Shape (reverse-engineered from the live `allanime.day` player bundle,
+   * `client/vitemb.*.js` + `client/getlinks.*.js`):
+   * ```
+   * { links: [ { portData: { streams: [ { url, format, hardsub_lang } ] },   // adaptive HLS/DASH
+   *              link, resolutionStr, hls, mp4, subtitles: [ { src|url, lang } ] } ],
+   *   subtitles: [ … ] }
+   * ```
+   * `portData.streams[].url` (whose `format` is `vo_adaptive_hls`/`vo_adaptive_dash`) is a direct
+   * master playlist and is used verbatim; a bare `link` is only taken when it's already a media URL
+   * (`.m3u8`/`.mp4`), since otherwise it's a third-party embed the player wraps in its own iframe.
+   * There is **no** further per-link decode (no XOR-0x06, no atob) in the current pipeline.
+   */
+  private resolveClockLink = async (
+    source: AllAnimeSourceUrl,
+    decodedPath: string
+  ): Promise<MkissaSource | null> => {
+    const url = Mkissa.clockJsonUrl(decodedPath);
+    // NOTE: plain `client`, not the solver — CLOCK_ORIGIN is not Cloudflare-gated. Referer required.
+    const res = await this.client.get(url, {
+      responseType: 'text',
+      headers: { Referer: `${Mkissa.CLOCK_ORIGIN}/` },
+    });
+    const body = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
+    const links: any[] = Array.isArray(body?.links) ? body.links : [];
+
+    const videos: IVideo[] = [];
+    const subtitles: ISubtitle[] = [];
+    const addSubs = (subs: any): void => {
+      if (!Array.isArray(subs)) return;
+      for (const s of subs) {
+        const su = s?.src ?? s?.url;
+        if (typeof su === 'string' && su) subtitles.push({ url: su, lang: String(s?.lang ?? s?.label ?? 'unknown') });
+      }
+    };
+
+    for (const link of links) {
+      const streams: any[] = Array.isArray(link?.portData?.streams) ? link.portData.streams : [];
+      for (const st of streams) {
+        const su = st?.url;
+        if (typeof su !== 'string' || !su) continue;
+        const fmt = String(st?.format ?? '');
+        videos.push({
+          url: su,
+          isM3U8: /hls|m3u8/i.test(fmt) || /\.m3u8(\?|$)/i.test(su),
+          isDASH: /dash|mpd/i.test(fmt) || /\.mpd(\?|$)/i.test(su),
+          ...(st?.hardsub_lang ? { hardsub: String(st.hardsub_lang) } : {}),
+        });
+      }
+      // legacy: a direct media `link` (embed links are handled by the extractor path, not here).
+      const direct = link?.link;
+      if (typeof direct === 'string' && /^https?:\/\//i.test(direct) && /\.(m3u8|mp4)(\?|$)/i.test(direct)) {
+        videos.push({
+          url: direct,
+          isM3U8: /\.m3u8(\?|$)/i.test(direct),
+          ...(link?.resolutionStr ? { quality: String(link.resolutionStr) } : {}),
+        });
+      }
+      addSubs(link?.subtitles);
+    }
+    addSubs(body?.subtitles);
+
+    if (!videos.length) return null;
+    return {
+      name: source.sourceName || 'Aa-Hls',
+      video: videos[0],
+      videos,
+      subtitles,
+      headers: { Referer: `${Mkissa.CLOCK_ORIGIN}/` },
       priority: Number(source.priority) || 0,
     };
   };
 
   private toSource = (s: MkissaSource): ISource => ({
     headers: s.headers,
-    sources: [s.video],
-    subtitles: [],
+    sources: s.videos?.length ? s.videos : [s.video],
+    subtitles: s.subtitles ?? [],
     serverName: s.name,
   });
 }

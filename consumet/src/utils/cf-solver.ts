@@ -1,6 +1,95 @@
 import axios, { AxiosInstance } from 'axios';
 import http2 from 'http2';
 
+// ---------------------------------------------------------------------------
+// Error-visibility helpers — shared by the aggregator / anilist meta layer.
+// They live in this utils module so provider failures are LOGGED (with real
+// cause + context) before any code degrades to partial/empty results.
+// ---------------------------------------------------------------------------
+
+/**
+ * Stringify ANY throwable for a log line without EVER throwing itself.
+ * `String(e)` is NOT safe: it throws on null-prototype objects and on values with a throwing
+ * `toString`. This survives `null`, `undefined`, Symbols, BigInts, circular objects,
+ * null-prototype objects, hostile getters and throwing `toString`/`toJSON`. For real Errors it
+ * yields `"Name: message"` (plus `" (HTTP <status>)"` for axios-shaped errors).
+ */
+export const safeErrorString = (err: unknown): string => {
+  try {
+    if (err === null) return 'null';
+    if (err === undefined) return 'undefined';
+    if (typeof err === 'string') return err;
+    if (typeof err === 'number' || typeof err === 'boolean') return `${err}`;
+    if (typeof err === 'bigint') return `${err}n`;
+    if (typeof err === 'symbol') {
+      try {
+        return err.toString();
+      } catch {
+        return 'Symbol(<unprintable>)';
+      }
+    }
+    if (err instanceof Error) {
+      let out: string;
+      try {
+        out = `${err.name || 'Error'}: ${err.message}`;
+      } catch {
+        out = 'Error: <unreadable message>'; // hostile name/message getter
+      }
+      try {
+        const status = (err as any)?.response?.status; // axios-shaped error → surface the HTTP status
+        if (status != null) out += ` (HTTP ${status})`;
+      } catch {
+        /* hostile getter — keep what we already have */
+      }
+      return out;
+    }
+    // non-Error object/function: JSON first (most info), then String(), then a fallback that
+    // cannot rely on the value's own methods.
+    try {
+      const json = JSON.stringify(err);
+      if (typeof json === 'string' && json !== '{}') return json;
+    } catch {
+      /* circular / bigint property / throwing toJSON — fall through */
+    }
+    try {
+      return String(err); // throws on null-prototype objects / throwing toString
+    } catch {
+      /* fall through */
+    }
+    // Object.prototype.toString reads Symbol.toStringTag (a hostile getter there is caught by
+    // the outer try) but never calls the value's own toString.
+    return Object.prototype.toString.call(err);
+  } catch {
+    return '<unprintable error>';
+  }
+};
+
+/**
+ * Summarise a GraphQL response body's populated `errors[]` — AniList returns **HTTP 200 with
+ * errors[]** when rate-limiting, which otherwise degrades into "every provider found nothing"
+ * and misdirects diagnosis toward the providers. Returns `undefined` when there is nothing to
+ * report. Never throws.
+ */
+export const graphqlErrorsSummary = (body: unknown): string | undefined => {
+  try {
+    const errs = (body as any)?.errors;
+    if (!Array.isArray(errs) || errs.length === 0) return undefined;
+    const parts = errs.slice(0, 3).map((e: any) => {
+      try {
+        const status = e?.status != null ? `[${e.status}] ` : '';
+        const msg = typeof e?.message === 'string' && e.message ? e.message : safeErrorString(e);
+        return `${status}${msg}`;
+      } catch {
+        return '<unreadable error entry>';
+      }
+    });
+    const more = errs.length > 3 ? ` (+${errs.length - 3} more)` : '';
+    return `${errs.length} error(s): ${parts.join('; ')}${more}`;
+  } catch {
+    return undefined;
+  }
+};
+
 /**
  * A solved Cloudflare clearance: the `cf_clearance` cookie **paired with the exact User-Agent it
  * was issued for**. Cloudflare binds the cookie to that UA string (and the solving IP), so the two
@@ -52,8 +141,9 @@ export const closeHttp2Sessions = (): void => {
   for (const s of sessions.values()) {
     try {
       s.close();
-    } catch {
-      /* ignore */
+    } catch (err) {
+      // best-effort cleanup — still degrade gracefully, but say what happened
+      console.warn(`[cf-solver] failed to close a pooled HTTP/2 session (ignored): ${safeErrorString(err)}`);
     }
   }
   sessions.clear();
@@ -102,8 +192,14 @@ export const http2Get = (url: string, headers: Record<string, string> = {}): Pro
       if (isJson) {
         try {
           data = JSON.parse(body);
-        } catch {
-          /* leave as text */
+        } catch (err) {
+          // response DECLARED application/json but the body isn't (often a challenge/interstitial
+          // page served with a JSON content-type) — leave as text, but log it so a "200 with
+          // unusable body" doesn't silently look like an empty result downstream.
+          console.warn(
+            `[cf-solver] ${url} returned status ${status} with content-type application/json but an unparseable body ` +
+              `(${body.length} bytes, starts ${JSON.stringify(body.slice(0, 80))}) — leaving as text: ${safeErrorString(err)}`
+          );
         }
       }
       resolve({ status, headers: resHeaders, data });
@@ -195,7 +291,7 @@ export class CloudflareSolver {
         { headers: { 'Content-Type': 'application/json' }, timeout: this.maxTimeoutMs + 15000 }
       ));
     } catch (err) {
-      throw new Error(`Cloudflare solver unreachable at ${this.endpoint} (${(err as Error).message})`);
+      throw new Error(`Cloudflare solver unreachable at ${this.endpoint} (${safeErrorString(err)})`);
     }
     if (data?.status !== 'ok' || !data?.solution)
       throw new Error(`Cloudflare solve failed for ${host}: ${data?.message ?? 'no solution returned'}`);
@@ -218,8 +314,17 @@ export class CloudflareSolver {
     let clearance = await this.solve(url);
     let res = await this.h2Get(url, clearance, headers);
     if (this.looksBlocked(res)) {
+      console.warn(
+        `[cf-solver] ${this.hostOf(url)} rejected the cached clearance (status ${res.status}) — ` +
+          `re-solving once and retrying: ${url}`
+      );
       clearance = await this.solve(url, true); // cookie expired/rotated → force a fresh solve
       res = await this.h2Get(url, clearance, headers);
+      if (this.looksBlocked(res))
+        console.error(
+          `[cf-solver] ${this.hostOf(url)} is STILL blocked after a fresh solve (status ${res.status}) — ` +
+            `Cloudflare is rejecting this client/IP; the blocked response flows through as-is: ${url}`
+        );
     }
     return res;
   };

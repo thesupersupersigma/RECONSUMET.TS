@@ -2,6 +2,7 @@ import axios, { AxiosInstance } from 'axios';
 
 import { AnimeParser, IAnimeEpisode, IAnimeInfo, ISource } from '../../models';
 import { compareTwoStrings } from '../../utils/utils';
+import { graphqlErrorsSummary, safeErrorString } from '../../utils/cf-solver';
 import AniNeko from '../anime/anineko';
 import AnimeNoSub from '../anime/animenosub';
 import AnikotoTV from '../anime/anikototv';
@@ -224,6 +225,14 @@ class AnimeAggregator {
       }
     }`;
     const { data } = await this.client.post(ANILIST_GRAPHQL, { query: gql, variables: { q: query, page, perPage } });
+    // AniList rate-limiting comes back as HTTP 200 + populated errors[] + null data. Without this
+    // log it degrades into an empty search result and misdirects diagnosis toward the providers.
+    const gqlErrors = graphqlErrorsSummary(data);
+    if (gqlErrors)
+      console.error(
+        `[aggregator] AniList search("${query}") returned HTTP 200 with populated errors[] — UPSTREAM AniList fault ` +
+          `(likely rate limiting), NOT a provider fault; degrading to empty results: ${gqlErrors}`
+      );
     return (data?.data?.Page?.media ?? []).map((m: any) => ({
       id: String(m.id),
       malId: m.idMal ?? undefined,
@@ -243,6 +252,14 @@ class AnimeAggregator {
       }
     }`;
     const { data } = await this.client.post(ANILIST_GRAPHQL, { query: gql, variables: { id: Number(anilistId) } });
+    // Same upstream-fault case as search(): HTTP 200 + errors[] (rate limiting) yields empty meta,
+    // which silently becomes "every provider found nothing" without this log.
+    const gqlErrors = graphqlErrorsSummary(data);
+    if (gqlErrors)
+      console.error(
+        `[aggregator] AniList meta for id ${anilistId} returned HTTP 200 with populated errors[] — UPSTREAM AniList ` +
+          `fault (likely rate limiting), NOT a provider fault; mapping will degrade to empty: ${gqlErrors}`
+      );
     const m = data?.data?.Media ?? {};
     const titles: string[] = [m.title?.english, m.title?.romaji, m.title?.native, ...(m.synonyms ?? [])].filter(Boolean);
     const maxOf = (fn: (t: string) => number | undefined) =>
@@ -287,9 +304,20 @@ class AnimeAggregator {
   };
 
   /** TIER 1: top-N title candidates for one provider, re-ranked by season/year/format. */
-  private rankedMatches = async (provider: AnimeParser, meta: AniMeta): Promise<IProviderMapping[]> => {
+  private rankedMatches = async (
+    provider: AnimeParser,
+    meta: AniMeta,
+    anilistId: string | number
+  ): Promise<IProviderMapping[]> => {
     const res: any = await provider.search(meta.titles[0]);
     const results: any[] = res?.results ?? [];
+    if (results.length === 0)
+      // the search call SUCCEEDED but carried nothing — distinct from a thrown error, and easy to
+      // mistake for one when a provider is quietly degraded (e.g. serving 200s with empty bodies).
+      console.warn(
+        `[aggregator] provider ${provider.name}: search("${meta.titles[0]}") for AniList id ${anilistId} ` +
+          `succeeded but returned 0 results — provider degraded or title absent (not an error)`
+      );
     const scored: { mapping: IProviderMapping; adjusted: number }[] = [];
     for (const r of results) {
       const rt = pickTitle(r.title);
@@ -309,10 +337,26 @@ class AnimeAggregator {
     anilistId: string | number
   ): Promise<{ meta: AniMeta; byProvider: Map<string, IProviderMapping[]> }> => {
     const meta = await this.metaFor(anilistId);
-    if (meta.titles.length === 0) return { meta, byProvider: new Map() };
+    if (meta.titles.length === 0) {
+      // nothing to search WITH — every provider gets skipped. Say so, or this reads as
+      // "no provider had the title" when the real fault is upstream metadata.
+      console.error(
+        `[aggregator] AniList meta for id ${anilistId} yielded NO titles — skipping all providers ` +
+          `(upstream metadata fault, NOT a provider fault)`
+      );
+      return { meta, byProvider: new Map() };
+    }
     const entries = await Promise.all(
       this.providers.map(async p => {
-        const list = await this.rankedMatches(p, meta).catch(() => [] as IProviderMapping[]);
+        const list = await this.rankedMatches(p, meta, anilistId).catch(err => {
+          // still degrade gracefully to "no candidates from this provider" — but log the REAL error
+          // first (a provider outage here used to vanish into an empty mapping list).
+          console.error(
+            `[aggregator] provider ${p.name}: search("${meta.titles[0]}") for AniList id ${anilistId} FAILED ` +
+              `(degrading to no candidates from this provider): ${safeErrorString(err)}`
+          );
+          return [] as IProviderMapping[];
+        });
         return [p.name.toLowerCase(), list] as const;
       })
     );
@@ -327,19 +371,34 @@ class AnimeAggregator {
     return best.sort((a, b) => b.score - a.score);
   };
 
-  /** TIER 2: verify a fetched candidate is actually the requested season. False ⇒ fall through. */
+  /** TIER 2: verify a fetched candidate is actually the requested season. False ⇒ fall through.
+   *  Every rejection is logged with the provider, the candidate and the SIGNAL that decided it —
+   *  falling through is correct behavior, but it must be diagnosable from one log line. */
   private verifyMatch = (info: IAnimeInfo, candidate: IProviderMapping, meta: AniMeta, requestedId: string): boolean => {
+    const reject = (signal: string): false => {
+      console.warn(
+        `[aggregator] verifyMatch REJECTED ${candidate.provider} candidate "${candidate.title}" ` +
+          `(id: ${candidate.id}) for AniList id ${requestedId} — deciding signal: ${signal}; falling through`
+      );
+      return false;
+    };
+
     // 1) exact leaked AniList id (ReAnime) — definitive, no fuzziness
-    if (info.alID != null && String(info.alID) !== '') return String(info.alID) === requestedId;
+    if (info.alID != null && String(info.alID) !== '') {
+      if (String(info.alID) === requestedId) return true;
+      return reject(`leaked AniList id mismatch (candidate page says alID=${info.alID}, requested ${requestedId})`);
+    }
 
     // 2) explicit season contradiction — both sides name an ordinal and they differ
     const candOrdinal = detectSeasonNumber(candidate.title) ?? detectSeasonNumber(String(candidate.id));
     const ordinalDecided = meta.seasonNumber != null && candOrdinal != null;
-    if (ordinalDecided && candOrdinal !== meta.seasonNumber) return false;
+    if (ordinalDecided && candOrdinal !== meta.seasonNumber)
+      return reject(`season ordinal contradiction (candidate says S${candOrdinal}, AniList says S${meta.seasonNumber})`);
 
     // explicit split-cour contradiction — both sides name a part/cour and they differ
     const candPart = detectPart(candidate.title) ?? detectPart(String(candidate.id));
-    if (meta.part != null && candPart != null && candPart !== meta.part) return false;
+    if (meta.part != null && candPart != null && candPart !== meta.part)
+      return reject(`part/cour contradiction (candidate says part ${candPart}, AniList says part ${meta.part})`);
 
     // 3) episode-count backstop — only when the ordinal couldn't decide, the show is finished,
     //    and AniList gives a count. Tolerant (recaps/specials drift). Never reject ongoing shows.
@@ -350,7 +409,10 @@ class AnimeAggregator {
       info.episodes?.length &&
       Math.abs(info.episodes.length - meta.episodes) > EPISODE_COUNT_TOLERANCE
     ) {
-      return false;
+      return reject(
+        `episode-count backstop (candidate has ${info.episodes.length} episodes, AniList expects ` +
+          `${meta.episodes} ±${EPISODE_COUNT_TOLERANCE}, status=${meta.status})`
+      );
     }
     return true;
   };
@@ -386,13 +448,28 @@ class AnimeAggregator {
       for (const candidate of probe) {
         try {
           const info = await provider.fetchAnimeInfo(candidate.id);
-          if (!info.episodes?.length) continue;
+          if (!info.episodes?.length) {
+            // fetch SUCCEEDED but carried no episodes — distinct from an error, and the classic
+            // signature of a quietly-degraded provider (200s with empty payloads).
+            console.warn(
+              `[aggregator] provider ${candidate.provider}: fetchAnimeInfo("${candidate.id}") ` +
+                `("${candidate.title}") for AniList id ${requestedId} succeeded but returned ZERO episodes — ` +
+                `skipping candidate (not an error)`
+            );
+            continue;
+          }
           if (this.verifyMatch(info, candidate, meta, requestedId)) {
             return { provider: candidate.provider, providerId: candidate.id, episodes: info.episodes };
           }
           sawCandidatesButNoneVerified = true; // had episodes but failed season verification
-        } catch {
-          /* try next candidate / provider */
+        } catch (err) {
+          // still fall through to the next candidate/provider — but log the REAL failure first
+          // (these used to vanish, turning a provider outage into a silent skip).
+          console.error(
+            `[aggregator] provider ${candidate.provider}: fetchAnimeInfo("${candidate.id}") ` +
+              `("${candidate.title}") for AniList id ${requestedId} FAILED (trying next candidate/provider): ` +
+              safeErrorString(err)
+          );
         }
       }
     }

@@ -12,8 +12,14 @@ import {
 
 class AnimeUnity extends AnimeParser {
   override readonly name = 'AnimeUnity';
-  protected override baseUrl = 'https://www.animeunity.to';
-  protected override logo = 'https://www.animeunity.to/favicon-32x32.png';
+  // NOTE (2026-08): animeunity.to now 301-redirects to animeunity.so — use the
+  // canonical domain directly instead of depending on the redirect surviving.
+  // The site is fronted by Cloudflare as a passive CDN only (no challenge): every
+  // endpoint returns 200 to plain axios with no cookies/headers from residential IPs.
+  // Blanket 403s are Cloudflare IP-reputation blocks on datacenter IPs (e.g. cloud VMs),
+  // not something fixable client-side.
+  protected override baseUrl = 'https://www.animeunity.so';
+  protected override logo = 'https://www.animeunity.so/favicon-32x32.png';
   protected override classPath = 'ANIME.AnimeUnity';
 
   /**
@@ -21,12 +27,30 @@ class AnimeUnity extends AnimeParser {
    */
   override search = async (query: string): Promise<ISearch<IAnimeResult>> => {
     try {
-      const res = await this.client.get(`${this.baseUrl}/archivio?title=${query}`);
+      const res = await this.client.get(`${this.baseUrl}/archivio?title=${encodeURIComponent(query)}`);
       const $ = load(res.data);
 
       if (!$) return { results: [] };
 
-      const items = JSON.parse('' + $('archivio').attr('records') + '');
+      // The <archivio> web-component carries the search results as a JSON string in
+      // its `records` attribute. Guard both the missing-attribute and bad-JSON cases
+      // so a markup change (or a Cloudflare IP-block stub that lacks the element)
+      // yields an actionable error instead of JSON.parse choking on "undefined".
+      const records = $('archivio').attr('records');
+      if (!records)
+        throw new Error(
+          'AnimeUnity: search page has no <archivio records="..."> element. ' +
+            'Site markup may have changed, or the request was blocked (Cloudflare datacenter-IP block serves a stub page).'
+        );
+
+      let items: any[];
+      try {
+        items = JSON.parse(records);
+      } catch {
+        throw new Error(
+          'AnimeUnity: failed to parse the <archivio> "records" JSON — the site markup likely changed.'
+        );
+      }
 
       const searchResult: {
         hasNextPage: boolean;
@@ -122,13 +146,44 @@ class AnimeUnity extends AnimeParser {
   };
 
   /**
-   *
-   * @param episodeId Episode id
+   * @param episodeId Episode id (format: `<animeId-slug>/<episodeId>`)
+   * @param server Ignored — AnimeUnity exposes a single embed (vixcloud) per episode.
+   * @param subOrDub Optional. On AnimeUnity, sub and dub are SEPARATE anime entries
+   *   (e.g. `1469-naruto` = sub, `1468-naruto-ita` = dub), each with its own episode
+   *   ids — you cannot switch languages for a given episode id. So this is treated as
+   *   an assertion: when explicitly provided, it is validated against the entry's own
+   *   `dub` flag and a clear error is thrown on mismatch, rather than silently serving
+   *   the wrong language. Selecting the dubbed version must happen at search/info time.
    */
-  override fetchEpisodeSources = async (episodeId: string): Promise<ISource> => {
+  override fetchEpisodeSources = async (
+    episodeId: string,
+    server?: string,
+    subOrDub?: 'sub' | 'dub'
+  ): Promise<ISource> => {
     try {
       const res = await this.client.get(`${this.baseUrl}/anime/${episodeId}`);
       const $ = load(res.data);
+
+      // Validate the requested language against this entry's actual dub flag. On
+      // AnimeUnity dub is a distinct title, so a mismatch can never be satisfied
+      // from this episode id — surface it instead of returning the wrong language.
+      if (subOrDub) {
+        const animeAttr = $('video-player').attr('anime');
+        let entryIsDub: boolean | undefined;
+        if (animeAttr) {
+          try {
+            entryIsDub = !!JSON.parse(animeAttr)?.dub;
+          } catch {
+            // couldn't read the flag — degrade gracefully, don't block the fetch
+          }
+        }
+        if (entryIsDub !== undefined && (subOrDub === 'dub') !== entryIsDub)
+          throw new Error(
+            `AnimeUnity: episode "${episodeId}" is a ${entryIsDub ? 'dub' : 'sub'}-only title, ` +
+              `but "${subOrDub}" was requested. On AnimeUnity the ${subOrDub} version is a separate ` +
+              `entry — select it from search results (dubs use the "-ita" slug / dub=1) and use its episode ids.`
+          );
+      }
 
       const episodeSources: ISource = {
         sources: [],
@@ -140,32 +195,46 @@ class AnimeUnity extends AnimeParser {
         const res = await this.client.get(streamUrl);
         const $ = load(res.data);
 
-        const domain = $('script:contains("window.video")')
-          .text()
-          ?.match(/url: '(.*)'/)![1];
-        const token = $('script:contains("window.video")')
-          .text()
-          ?.match(/token': '(.*)'/)![1];
-        const expires = $('script:contains("window.video")')
-          .text()
-          ?.match(/expires': '(.*)'/)![1];
+        // The embed page defines `window.video = { url, token, expires, ... }`. If the
+        // embed host is region-blocked or the layout changes, .match() returns null;
+        // fail with an explicit "layout changed" message instead of an opaque
+        // "Cannot read properties of null" from a non-null assertion.
+        const embedScript = $('script:contains("window.video")').text();
+        const domain = embedScript.match(/url: '(.*)'/)?.[1];
+        const token = embedScript.match(/token': '(.*)'/)?.[1];
+        const expires = embedScript.match(/expires': '(.*)'/)?.[1];
+
+        if (!domain || !token || !expires)
+          throw new Error(
+            'AnimeUnity: could not extract stream url/token/expires from the embed page (window.video). ' +
+              'The embed layout may have changed, or the embed host is region-blocked and served a different page.'
+          );
 
         const defaultUrl = `${domain}?token=${token}&referer=&expires=${expires}&h=1`;
         const m3u8Content = await this.client.get(defaultUrl);
 
-        if (m3u8Content.data.includes('EXTM3U')) {
-          const videoList = m3u8Content.data.split('#EXT-X-STREAM-INF:');
-          for (const video of videoList ?? []) {
-            if (video.includes('BANDWIDTH')) {
-              const url = video.split('\n')[1];
-              const quality = video.split('RESOLUTION=')[1].split('\n')[0].split('x')[1];
+        // Confirm the master really is a live HLS manifest before reporting success —
+        // same guarantee as verifyMasterPlaylist(), applied to the body we already
+        // fetched. Otherwise a 200-with-stub-body (dead/not-yet-encoded stream) would
+        // be reported as a playable source.
+        const masterBody = typeof m3u8Content.data === 'string' ? m3u8Content.data : String(m3u8Content.data);
+        if (!masterBody.includes('#EXTM3U'))
+          throw new Error(
+            `AnimeUnity: master playlist for "${episodeId}" is not a valid HLS manifest ` +
+              `(dead or not-yet-encoded stream?): ${defaultUrl}`
+          );
 
-              episodeSources.sources.push({
-                url: url,
-                quality: `${quality}p`,
-                isM3U8: true,
-              });
-            }
+        const videoList = masterBody.split('#EXT-X-STREAM-INF:');
+        for (const video of videoList ?? []) {
+          if (video.includes('BANDWIDTH')) {
+            const url = video.split('\n')[1];
+            const quality = video.split('RESOLUTION=')[1].split('\n')[0].split('x')[1];
+
+            episodeSources.sources.push({
+              url: url,
+              quality: `${quality}p`,
+              isM3U8: true,
+            });
           }
         }
 
@@ -175,10 +244,11 @@ class AnimeUnity extends AnimeParser {
           isM3U8: true,
         });
 
-        episodeSources.download = $('script:contains("window.downloadUrl ")')
+        // Download URL is a bonus — absence shouldn't fail the whole fetch.
+        const downloadUrl = $('script:contains("window.downloadUrl ")')
           .text()
-          ?.match(/downloadUrl = '(.*)'/)![1]
-          ?.toString();
+          .match(/downloadUrl = '(.*)'/)?.[1];
+        if (downloadUrl) episodeSources.download = downloadUrl.toString();
       }
 
       return episodeSources;
