@@ -4,8 +4,29 @@ import { load } from 'cheerio';
 import { ProxyConfig } from '../models';
 import axios, { AxiosRequestConfig, AxiosInstance } from 'axios';
 
+/**
+ * Default browser User-Agent for scraping requests.
+ *
+ * This was Chrome/83.0.4103.116 — a mid-2020 build, i.e. six years stale, which is a bot signal on
+ * its own to anything fingerprinting: no real visitor is on it, and the full `83.0.4103.116` build
+ * number is itself dated, since Chrome froze the minor/build/patch fields to `0.0.0` in the M107 UA
+ * reduction. A modern desktop Chrome UA therefore ends `Chrome/<major>.0.0.0`.
+ *
+ * Deliberately set a little behind the newest release rather than at it: real users lag, whereas a
+ * version that does not exist yet is a stronger signal than one that is slightly old. Refresh it
+ * every so often — it does not need to track Chrome exactly, only to stay plausible.
+ *
+ * SAFE TO CHANGE with respect to Cloudflare clearances: Byparr issues a `cf_clearance` cookie bound
+ * to the UA it solved with, and sending a different UA invalidates it — but that pairing never uses
+ * this constant. {@link CloudflareSolver.get} overrides `user-agent` with `clearance.userAgent`
+ * whenever it attaches the cookie (src/utils/cf-solver.ts), and no provider sends this UA alongside
+ * a clearance cookie by another route.
+ *
+ * Not the only UA in the tree — see the inventory in the M5 commit; several are pinned per host on
+ * purpose (rabbit.ts impersonates Firefox to match its WASM shim).
+ */
 export const USER_AGENT =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/83.0.4103.116 Safari/537.36';
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36';
 
 /**
  * Confirm that a resolved HLS master-playlist URL actually exists upstream before
