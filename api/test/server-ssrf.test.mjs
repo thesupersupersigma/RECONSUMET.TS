@@ -131,3 +131,45 @@ test('/proxy never actually contacts a blocked target', async () => {
   assert.ok(!body.includes('SECRET-CANARY-BODY'), 'internal response body leaked through /proxy');
   assert.equal(canaryHits, before, 'the guard let a request through to the internal service');
 });
+
+// ---------------------------------------------------------------- M2: /watch episodeId
+//
+// Providers resolve an episodeId that starts with "http" as a full URL and fetch it directly
+// (gogoanime.ts:191, anizone.ts:238, anineko.ts:254, animenosub.ts:238 — all `id.startsWith('http')
+// ? id : base+id`), so episodeId is a second, blind SSRF vector. `__nope__` is a deliberately
+// unknown provider: the aggregator rejects it before any network call, so these stay offline and
+// let us tell "rejected by the guard" (400) apart from "reached the aggregator" (502).
+
+const watch = episodeId =>
+  fetch(`${base}/watch?provider=__nope__&episodeId=${encodeURIComponent(episodeId)}`);
+
+test('/watch rejects a URL-shaped episodeId pointing at metadata or internal hosts', async () => {
+  for (const id of [
+    'http://169.254.169.254/latest/meta-data/iam/security-credentials/',
+    'http://127.0.0.1:4000/',
+    'http://10.0.0.5/internal',
+    'http://[::1]/',
+    'https://[::ffff:169.254.169.254]/',
+    'http://localhost:4000/',
+  ]) {
+    const res = await watch(id);
+    assert.equal(res.status, 400, `${id} → ${res.status}`);
+    assert.match((await res.json()).error, /'episodeId' rejected/, id);
+  }
+});
+
+test('/watch never contacts an internal target named by episodeId (blind SSRF)', async () => {
+  const before = canaryHits;
+  const res = await watch(canaryUrl);
+  assert.equal(res.status, 400);
+  assert.equal(canaryHits, before, 'episodeId reached the internal service');
+});
+
+test('/watch leaves ordinary slug episodeIds and public URLs alone', async () => {
+  // Not rejected by the guard — they reach the aggregator, which 502s on the unknown provider.
+  for (const id of ['naruto-episode-1', 'one-piece/1a2b3c4d-5e6f', 'https://1.1.1.1/legit.m3u8']) {
+    const res = await watch(id);
+    assert.equal(res.status, 502, `${id} → ${res.status}`);
+    assert.doesNotMatch((await res.json()).error, /episodeId' rejected/, id);
+  }
+});
