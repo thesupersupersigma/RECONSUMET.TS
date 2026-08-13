@@ -81,8 +81,12 @@ export function isBlockedIp(ip) {
  * Validate that `urlString` is safe to fetch server-side. Resolves the host and checks every
  * resulting address. Throws {@link SsrfError} on any violation; resolves to the array of vetted IP
  * strings on success (useful for connection pinning if a caller wants it).
+ *
+ * `lookup` is injectable (same contract as `dns.lookup(host, {all:true})`) so the resolver-dependent
+ * branches — a name resolving to a private address, or to a public AND a private one — are unit-
+ * testable without depending on real DNS.
  */
-export async function assertUrlSafe(urlString) {
+export async function assertUrlSafe(urlString, { lookup = dns.lookup } = {}) {
   let u;
   try {
     u = new URL(urlString);
@@ -105,7 +109,7 @@ export async function assertUrlSafe(urlString) {
   // public and a private address must not slip through on the public one.
   let addrs;
   try {
-    addrs = await dns.lookup(host, { all: true, verbatim: true });
+    addrs = await lookup(host, { all: true, verbatim: true });
   } catch {
     throw new SsrfError(`could not resolve host ${host}`);
   }
@@ -128,7 +132,7 @@ export async function assertUrlSafe(urlString) {
 export async function followSafeRedirects(
   initialUrl,
   fetchOpts = {},
-  { fetchImpl = fetch, maxRedirects = 5 } = {}
+  { fetchImpl = fetch, maxRedirects = 5, lookup } = {}
 ) {
   let url = initialUrl;
   for (let hop = 0; ; hop++) {
@@ -138,7 +142,7 @@ export async function followSafeRedirects(
       if (!loc) return res; // 3xx without a Location — nothing to follow
       if (hop >= maxRedirects) throw new SsrfError(`exceeded ${maxRedirects} redirects while proxying ${initialUrl}`);
       const next = new URL(loc, url).href;
-      await assertUrlSafe(next); // ← re-validate BEFORE following the redirect
+      await assertUrlSafe(next, lookup ? { lookup } : {}); // ← re-validate BEFORE following the redirect
       try {
         await res.body?.cancel?.(); // release the socket for the abandoned hop
       } catch {}

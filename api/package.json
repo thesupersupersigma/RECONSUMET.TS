@@ -5,7 +5,8 @@
   "type": "module",
   "description": "Self-hosted HTTP API over the anime aggregator (AniList search/mapping + HLS proxy).",
   "scripts": {
-    "start": "node src/server.mjs"
+    "start": "node src/server.mjs",
+    "test": "node --test 'test/**/*.test.mjs'"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.1",
