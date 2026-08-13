@@ -282,7 +282,26 @@ class AnikotoTV extends AnimeParser {
     return data?.result?.url ?? '';
   };
 
-  /** route a resolved embed URL to the right extractor */
+  /**
+   * Route a resolved embed URL to an extractor.
+   *
+   * The host patterns here are HINTS, not a whitelist. Pinning a literal host is how AniNeko
+   * broke: it matched on `vibeplayer.site`, the host renamed itself to `vivibebe.site`, and the
+   * provider silently returned nothing until someone traced it by hand. AnikotoTV was already
+   * living the same story — its `VidPlay-1` server hands back `vidtube.site`, which this router
+   * did not know, so that server was dropped on every single request (verified live: it logged
+   * "unsupported embed host: vidtube.site" while the other two servers worked).
+   *
+   * So an unrecognised host is NOT an error: both extractors take their origin from the URL they
+   * are handed ({@link MegaPlay} reads `data-id` then `<origin>/stream/getSources?id=`;
+   * {@link VibePlayer} reads the embed page for an `.m3u8`), so they work unchanged against a
+   * renamed host. We recognise what we know, then fall back to trying those SHAPES in turn.
+   * vidtube.site, for one, speaks the megaplay protocol exactly.
+   *
+   * Only when no reader can handle it do we throw — and then loudly, naming the host, the URL and
+   * every attempt, because "provider mysteriously returns nothing" is the symptom this class of
+   * break otherwise produces.
+   */
   private extractEmbed = async (embed: string): Promise<ISource> => {
     // some hosts wrap the real embed as `…/plyr.php#<base64 of inner url>#`
     let url = embed;
@@ -296,29 +315,48 @@ class AnikotoTV extends AnimeParser {
       }
     }
 
-    const host = (() => {
-      try {
-        return new URL(url).host;
-      } catch {
-        return '';
-      }
-    })();
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      throw new Error(`AnikotoTV: embed is not a usable url: ${JSON.stringify(embed)}`);
+    }
+    const host = parsed.host;
 
-    if (host.includes('megaplay')) {
-      return new MegaPlay(this.proxyConfig, this.adapter).extract(new URL(url));
-    }
-    if (host.includes('vibeplayer')) {
-      return new VibePlayer(this.proxyConfig, this.adapter).extract(new URL(url));
-    }
+    /** megaplay protocol: embed page `data-id` → `<origin>/stream/getSources?id=` JSON */
+    const asMegaPlay = () => new MegaPlay(this.proxyConfig, this.adapter).extract(parsed);
+    /** generic jwplayer-ish embed: fetch the page, take the `.m3u8` it references */
+    const asVibePlayer = () => new VibePlayer(this.proxyConfig, this.adapter).extract(parsed);
+
+    // known hosts first — same shapes, just skipping the probing
+    if (/megaplay/i.test(host)) return asMegaPlay();
+    if (/vibeplayer|vivibebe/i.test(host)) return asVibePlayer(); // vivibebe = the renamed vibeplayer
     // direct HLS fallthrough
     if (url.includes('.m3u8')) {
       return {
-        headers: { Referer: `${host ? `https://${host}` : this.baseUrl}/` },
+        headers: { Referer: `https://${host}/` },
         sources: [{ url, quality: 'auto', isM3U8: true }],
         subtitles: [],
       };
     }
-    throw new Error(`unsupported embed host: ${host || embed}`);
+
+    // Unrecognised host: try the shapes we know rather than giving up — this is what a rename
+    // looks like from here, and it is also how new sibling hosts (vidtube.site) show up.
+    const attempts: string[] = [];
+    for (const [shape, run] of [
+      ['megaplay-protocol', asMegaPlay],
+      ['generic-embed', asVibePlayer],
+    ] as const) {
+      try {
+        return await run();
+      } catch (err) {
+        attempts.push(`${shape}: ${(err as Error).message}`);
+      }
+    }
+    throw new Error(
+      `AnikotoTV: no reader could handle embed host "${host}" (${url}). This is what a host rename ` +
+        `looks like — AniNeko's vibeplayer.site became vivibebe.site. Tried ${attempts.join(' | ')}`
+    );
   };
 }
 
