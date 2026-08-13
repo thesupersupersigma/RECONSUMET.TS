@@ -435,6 +435,19 @@ app.get('/watch', { preHandler: apiGuard('watch') }, async (req, reply) => {
   if (!provider || !episodeId) {
     return reply.code(400).send({ error: "missing 'provider' and/or 'episodeId' query params" });
   }
+  // M2 SSRF guard: several providers (gogoanime, anizone, anineko, animenosub, senshi) treat an
+  // episodeId that starts with "http" as a full URL and fetch it directly. That makes episodeId a
+  // second SSRF vector — ?episodeId=http://169.254.169.254/... — so it goes through the SAME guard
+  // as /proxy (H1). Non-URL ids (the normal case) are untouched. Blind (the body isn't returned),
+  // but it still enables internal host/port probing from the server, so we close it at this boundary.
+  if (typeof episodeId === 'string' && episodeId.startsWith('http')) {
+    try {
+      await assertUrlSafe(episodeId);
+    } catch (e) {
+      if (e instanceof SsrfError) return reply.code(400).send({ error: `'episodeId' rejected: ${e.message}` });
+      return reply.code(400).send({ error: "invalid 'episodeId' query param" });
+    }
+  }
 
   const base = proxyBase(req);
   // shape ONE server's ISource into a response object, or null if it has no sources. Each
