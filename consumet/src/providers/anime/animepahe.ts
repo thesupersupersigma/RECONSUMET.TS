@@ -193,8 +193,10 @@ class AnimePahe extends AnimeParser {
     for (const button of buttons) {
       try {
         sources.push(await this.resolveSource(button));
-      } catch {
-        /* skip an embed that fails to unpack; keep the rest */
+      } catch (err) {
+        // Skip an embed that fails to unpack, but say WHY — a silent skip here once hid a kwik
+        // format change as an empty result. The batch still succeeds on the servers that resolve.
+        console.warn(`[AnimePahe] skipping server "${this.serverLabel(button)}" (${button.src}): ${(err as Error)?.message ?? err}`);
       }
     }
     if (sources.length === 0) throw new Error('every kwik embed failed to resolve for episode');
@@ -288,21 +290,69 @@ class AnimePahe extends AnimeParser {
    * Resolve a `kwik.cx/e/<id>` embed to its `.m3u8`. The embed page is Referer-gated on
    * `https://animepahe.pw/` (NOT `cf_clearance`-gated — no cookie needed) but, like the rest of the
    * pipeline, answers **only over HTTP/2** (it 403s HTTP/1.1), so it goes through {@link http2Get}
-   * rather than the axios `this.client`. It hides the stream in an eval-packed script whose sole
-   * `…m3u8` match is the playlist. (The shared {@link Kwik} extractor can't be reused: it is
-   * HTTP/1.1 and hard-codes an `animepahe.com` Referer that now 403s.)
+   * rather than the axios `this.client`. It hides the stream in a P.A.C.K.E.R-packed script whose
+   * sole `…m3u8` match is the playlist; {@link unpackPacker} expands it deterministically (no eval).
+   * (The shared {@link Kwik} extractor can't be reused: it is HTTP/1.1 and hard-codes an
+   * `animepahe.com` Referer that now 403s.)
    */
   private unpackKwik = async (embedUrl: string): Promise<string> => {
     const { status, data } = await http2Get(embedUrl, { referer: `${this.baseUrl}/`, 'user-agent': USER_AGENT });
     if (status !== 200) throw new Error(`kwik embed returned HTTP ${status}: ${embedUrl}`);
-    const packed = /(eval)(\(f.*?)(\n<\/script>)/s.exec(data);
-    if (!packed) throw new Error(`kwik embed had no packed player script: ${embedUrl}`);
-    // eslint-disable-next-line no-eval -- the packer is a self-contained P.A.C.K.E.R string; running
-    // it yields the deobfuscated player source (same technique as the shared Kwik extractor).
-    const unpacked: string = eval(packed[2].replace('eval', ''));
+    const unpacked = AnimePahe.unpackPacker(data, embedUrl);
     const m3u8 = unpacked.match(/https?:\/\/[^"'\s]+?\.m3u8/);
-    if (!m3u8) throw new Error(`no m3u8 found in kwik embed: ${embedUrl}`);
+    if (!m3u8) throw new Error(`no m3u8 found in unpacked kwik embed: ${embedUrl}`);
     return m3u8[0];
+  };
+
+  /**
+   * Expand the Dean Edwards P.A.C.K.E.R payload that kwik hides its `.m3u8` in — **without `eval`**.
+   *
+   * The embed page comes from a third party (kwik), so `eval`-ing its script would execute
+   * attacker-controlled JavaScript with full Node privileges inside the API process (RCE). Instead we
+   * parse the packer's four arguments — `p` (payload), `a` (radix), `c` (symbol count), `k` (keyword
+   * table) — and perform the exact base-N token substitution the packer's own `e()` function does.
+   * This is pure string manipulation; no code from the page is ever executed.
+   *
+   * Fails LOUDLY (throws with context) on any input that isn't a well-formed packer call — it never
+   * returns a partial/empty result silently, so a kwik format change surfaces as a clear error
+   * rather than a mystery "no sources".
+   */
+  private static unpackPacker = (page: string, embedUrl = '<kwik embed>'): string => {
+    // Isolate the packed script: `eval(function(p,a,c,k,e,d){…}('…',a,c,'…'.split('|'),0,{}))`.
+    const script = /(eval)(\(f.*?)(\n<\/script>)/s.exec(page);
+    if (!script) throw new Error(`kwik embed had no packed player script: ${embedUrl}`);
+    // The invocation always ends `…'<payload>',<radix>,<count>,'<w|o|r|d>'.split('|')`. Greedy
+    // <payload> backtracks to the single `.split('|')` anchor, so quotes/commas/digits inside the
+    // payload don't derail it; `s` flag lets the payload span newlines.
+    const args = /\}\s*\(\s*'(.*)'\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*'(.*)'\s*\.split\('\|'\)/s.exec(script[2]);
+    if (!args) throw new Error(`kwik packer had an unrecognised argument shape: ${embedUrl}`);
+    const radix = parseInt(args[2], 10);
+    const count = parseInt(args[3], 10);
+    const words = args[4].split('|');
+    if (!Number.isInteger(radix) || radix < 2 || radix > 62) throw new Error(`kwik packer: invalid radix ${args[2]}: ${embedUrl}`);
+    if (!Number.isInteger(count) || count < 0 || count > 1_000_000) throw new Error(`kwik packer: implausible symbol count ${args[3]}: ${embedUrl}`);
+    if (words.length < count) throw new Error(`kwik packer: keyword table (${words.length}) shorter than declared count (${count}): ${embedUrl}`);
+
+    // Undo the JS string-literal escaping in the payload (\\ \' \n \t \r) — without eval.
+    const payload = args[1].replace(/\\(.)/g, (_m, ch) => (ch === 'n' ? '\n' : ch === 't' ? '\t' : ch === 'r' ? '\r' : ch));
+    // Packer token alphabet, base = radix: 0-9 → '0'-'9', 10-35 → 'a'-'z', 36-61 → 'A'-'Z'.
+    const encode = (n: number): string => {
+      let token = '';
+      do {
+        const r = n % radix;
+        token = (r < 10 ? String(r) : r < 36 ? String.fromCharCode(87 + r) : String.fromCharCode(29 + r)) + token;
+        n = Math.floor(n / radix);
+      } while (n > 0);
+      return token;
+    };
+    // Build the token→keyword dictionary, then do ONE pass over the payload's `\w+` runs, replacing
+    // each via the dictionary. This is what the packer itself does (`d[e(c)]=k[c]||e(c)`) and — unlike
+    // a sequential regex replace — never re-scans an already-substituted keyword, so a token that
+    // happens to appear inside a keyword (common at radix 10, where tokens are digits) isn't corrupted.
+    // An empty keyword means the token maps to itself.
+    const dict = new Map<string, string>();
+    for (let i = 0; i < count; i++) dict.set(encode(i), words[i] || encode(i));
+    return payload.replace(/\b\w+\b/g, tok => dict.get(tok) ?? tok);
   };
 
   private qualityLabel = (b: PaheButton): string => (b.resolution ? `${b.resolution}p` : 'default');
