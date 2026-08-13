@@ -34,6 +34,7 @@ import cors from '@fastify/cors';
 import { Readable } from 'node:stream';
 import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
+import { assertUrlSafe, followSafeRedirects, SsrfError } from './ssrf-guard.mjs';
 import pkg from '../../consumet/dist/index.js';
 
 const { AnimeAggregator } = pkg;
@@ -346,7 +347,9 @@ const proxiedUpstream = async (target, { referer, range, extraHeaders }) => {
   if (referer) headers.Referer = referer;
   if (range) headers.Range = range;
   if (extraHeaders) Object.assign(headers, extraHeaders);
-  const r = await fetch(target, { headers, signal: AbortSignal.timeout(PROXY_TIMEOUT_MS) });
+  // Manual redirect-following with per-hop SSRF re-validation (the redirect is part of the exploit
+  // path — a public URL that 302s to a private/metadata address must be caught here, not followed).
+  const r = await followSafeRedirects(target, { headers, signal: AbortSignal.timeout(PROXY_TIMEOUT_MS) });
   return {
     status: r.status,
     getHeader: name => r.headers.get(name),
@@ -490,7 +493,14 @@ app.get('/proxy', { preHandler: rateLimit('proxy') }, async (req, reply) => {
   const org = req.query.org; // segment-CDN Origin (KickAssAnime segments 403 without it)
   const aud = req.query.aud; // default-audio language for the HLS master (KickAssAnime dub)
   if (!target) return reply.code(400).send({ error: "missing 'url' query param" });
-  if (!isHttpUrl(target)) return reply.code(400).send({ error: "'url' must be an http(s) URL" });
+  // SSRF guard: scheme + private/loopback/link-local/metadata range blocking, resolving DNS. Redirect
+  // targets are re-validated inside proxiedUpstream's plain-fetch path (followSafeRedirects).
+  try {
+    await assertUrlSafe(target);
+  } catch (e) {
+    if (e instanceof SsrfError) return reply.code(400).send({ error: `'url' rejected: ${e.message}` });
+    return reply.code(400).send({ error: "invalid 'url' query param" });
+  }
 
   // UniqueStream key.bin: send the load-bearing x-am-media-id header, then transform the body below.
   const isKeyBin = km && /key\.bin(\?|$)/.test(target);
