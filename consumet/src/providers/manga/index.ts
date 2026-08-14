@@ -5,12 +5,8 @@ import MangaKakalot from './mangakakalot';
 import Mangasee123 from './mangasee123';
 import Mangapark from './mangapark';
 import MangaPill from './mangapill';
-import MangaReader from './mangareader';
 import AsuraScans from './asurascans';
 import FlameScans from './flamescans';
-import MangaHost from './mangahost';
-import BRMangas from './brmangas';
-import ReadManga from './readmanga';
 import VyvyManga from './vyvymanga';
 
 export default {
@@ -21,11 +17,7 @@ export default {
   Mangasee123,
   Mangapark,
   MangaPill,
-  MangaReader,
   AsuraScans,
   FlameScans,
-  MangaHost,
-  BRMangas,
-  ReadManga,
   VyvyManga,
 };
