@@ -108,10 +108,14 @@ describe('converted call sites still read a legitimate packed page', () => {
   });
 
   test('mangahere reads its page list', async () => {
-    const page = buildPage(pack(`var pix=['//zjcdn.example/p1.jpg','//zjcdn.example/p2.jpg'];`, 36)).replace(
-      '<body>',
-      '<body><script src="/chapter_bar.js"></script>'
-    );
+    // The array is `newImgs`, alongside `newImginfos`. This fixture used to say `pix=`, which is the
+    // OTHER reader's variable (the chapterfun.ashx one) and never appears in a chapter_bar payload;
+    // it passed only because the parser then took the first `['` in the script regardless of name.
+    // Re-confirmed live 2026-08-14 against berserk/c001 and solo_leveling/c001, both of which take
+    // this branch and both of which unpack to exactly `var newImgs=[…];…newImginfos=[…]`.
+    const page = buildPage(
+      pack(`var newImgs=['//zjcdn.example/p1.jpg','//zjcdn.example/p2.jpg'];var newImginfos=[11,12];`, 36)
+    ).replace('<body>', '<body><script src="/chapter_bar.js"></script>');
     const pages = await withPage(new MangaHere(), page).fetchChapterPages('naruto/c001');
     assert.deepEqual(
       pages.map(p => p.img),

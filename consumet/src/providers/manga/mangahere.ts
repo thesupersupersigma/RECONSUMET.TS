@@ -3,6 +3,49 @@ import { load } from 'cheerio';
 import { MangaParser, ISearch, IMangaInfo, IMangaResult, MediaStatus, IMangaChapterPage } from '../../models';
 import { unpackPacker, unpackJsStringConcat } from '../../utils/unpack-packer';
 
+/**
+ * Pull one bracketed array literal out of an unpacked MangaHere script by variable name, and return
+ * its elements as raw (still-quoted, for string arrays) source text. `null` when the variable is not
+ * there at all — callers decide whether that is fatal.
+ *
+ * The chapter_bar reader's script is `var newImgs=['//a.jpg','//b.jpg'];var newImginfos=[12,13];`,
+ * and neither name can be renamed without MangaHere also shipping a new chapter_bar.js, which reads
+ * both by those exact names.
+ */
+const readArrayLiteral = (script: string, name: string): string[] | null => {
+  const m = new RegExp(`\\b${name}\\s*=\\s*\\[([^\\]]*)\\]`).exec(script);
+  if (!m) return null;
+  return m[1]
+    .split(',')
+    .map(s => s.trim())
+    .filter(s => s.length > 0);
+};
+
+/** `'//host/a.jpg'` → `https://host/a.jpg`. Throws — with the offending text — on anything else. */
+const imageUrlFromLiteral = (literal: string, where: string): string => {
+  const quoted = /^'([^']*)'$/.exec(literal) ?? /^"([^"]*)"$/.exec(literal);
+  if (!quoted) throw new Error(`MangaHere: ${where} is not a quoted string literal: ${literal.slice(0, 120)}`);
+  const value = quoted[1];
+  if (value.startsWith('//')) return `https:${value}`;
+  if (/^https?:\/\//.test(value)) return value;
+  throw new Error(`MangaHere: ${where} is not an absolute image url: ${value.slice(0, 120)}`);
+};
+
+/**
+ * MangaHere appends ONE booby-trapped entry to the end of every chapter's image list. Its filename is
+ * the real last page's with a single character swapped (`…_image090.jpg` → `…_ah001_image090.jpg`,
+ * `/s051.jpg` → `/s05a.jpg`), and `zjcdn.mangahere.org` answers it with HTTP 200 and a genuinely
+ * decodable 1000x563 PNG — so neither the status code nor the magic bytes give it away downstream.
+ *
+ * The site marks it in its own data: the decoy repeats the previous page's image id (`newImginfos`'s
+ * last two entries are equal in the chapter_bar reader; `currentimageid` repeats on the final
+ * chapterfun.ashx response in the other one). Probed 2026-08-14 across berserk c001/c200/c364,
+ * solo_leveling c001/c010, chainsaw_man c001, one_piece v98/c1190, jujutsu_kaisen c001 and
+ * oyasumi_punpun c001: every one carried exactly one repeated id, always at the very last index, so
+ * keying off the repeat cannot swallow a real page.
+ */
+const isRepeatedImageId = (id: string, previousId: string): boolean => id !== '' && id === previousId;
+
 class MangaHere extends MangaParser {
   override readonly name = 'MangaHere';
   protected override baseUrl = 'http://www.mangahere.cc';
@@ -81,16 +124,48 @@ class MangaHere extends MangaParser {
 
       const bar = $('script[src*=chapter_bar]').data();
       const html = $.html();
+      // WHICH READER YOU GET IS DECIDED PER CHAPTER, NOT PER SERIES. An earlier audit sampled four
+      // chapters, found no `chapter_bar` script in any of them, and wrote this branch off as dead
+      // code for "a page layout that no longer exists". It is live: berserk/c001, berserk/c200,
+      // berserk/c364, solo_leveling/c001 and solo_leveling/c010 all take it, while chainsaw_man/c001,
+      // one_piece/v98/c1190, kaguya/c001, jujutsu_kaisen/c001 and oyasumi_punpun/c001 take the other
+      // one — same site, same day (probed 2026-08-14). Do not "simplify" this away.
       if (typeof bar !== 'undefined') {
         // mangahere's page is third-party: expand its packed script as data, never execute it.
         const ds = unpackPacker(html, url);
 
-        const urls = ds.split("['")[1].split("']")[0].split("','");
+        // This used to be `ds.split("['")[1].split("']")[0].split("','")`, which assumes the first
+        // `['` in the unpacked script opens the image array. When that stops being true the `[1]` is
+        // `undefined` and the next `.split` throws `Cannot read properties of undefined` — a stack
+        // trace that names neither MangaHere nor the chapter. Read the array by name and say so.
+        const literals = readArrayLiteral(ds, 'newImgs');
+        if (!literals?.length)
+          throw new Error(
+            `MangaHere: the chapter_bar reader for ${url} shipped no readable newImgs[] — its page ` +
+              `shape changed. Unpacked script began: ${ds.slice(0, 200)}`
+          );
 
-        urls.map((url, i) =>
+        const imgs = literals.map((literal, i) => imageUrlFromLiteral(literal, `newImgs[${i}] of ${url}`));
+
+        // drop the trailing soft-404 decoy, which the page flags by repeating the previous image id
+        const imageIds = readArrayLiteral(ds, 'newImginfos');
+        if (
+          imageIds?.length === imgs.length &&
+          imgs.length >= 2 &&
+          isRepeatedImageId(imageIds[imageIds.length - 1], imageIds[imageIds.length - 2])
+        )
+          imgs.pop();
+
+        imgs.forEach((img, i) =>
           chapterPages.push({
             page: i,
-            img: `https:${url}`,
+            img,
+            // `url` is the CHAPTER PAGE. This used to read `Referer: url` from inside a
+            // `urls.map((url, i) => …)` callback, where `url` was shadowed by the image's own
+            // protocol-relative path — so every page went out with `Referer: //zjcdn.mangahere.org/…`.
+            // It only ever worked by accident: the CDN's hotlink check is a bare substring test for
+            // "mangahere", which the CDN's own hostname happens to satisfy. Any CDN rename would have
+            // turned the whole branch into 403s.
             headerForImage: { Referer: url },
           })
         );
@@ -106,6 +181,7 @@ class MangaHere extends MangaParser {
         const pageBase = url.substring(0, url.lastIndexOf('/'));
 
         let resText = '';
+        let previousImageId = '';
         for (let i = 1; i <= pages; i++) {
           const pageLink = `${pageBase}/chapterfun.ashx?cid=${chapterId}&page=${i}&key=${sKey}`;
 
@@ -127,16 +203,34 @@ class MangaHere extends MangaParser {
           // chapterfun.ashx answers with a packed script; expand it as data.
           const ds = unpackPacker(resText, pageLink);
 
-          const baseLinksp = ds.indexOf('pix=') + 5;
+          // `indexOf(…) + 5` on a missing needle is 4, which silently yields a garbage url instead of
+          // an error — strictly worse than throwing, because it surfaces as a broken image much later.
+          const pixAt = ds.indexOf('pix=');
+          const pvalueAt = ds.indexOf('pvalue=');
+          if (pixAt < 0 || pvalueAt < 0)
+            throw new Error(
+              `MangaHere: chapterfun.ashx answered without pix=/pvalue= for ${pageLink} — its ` +
+                `response shape changed. Unpacked script began: ${ds.slice(0, 200)}`
+            );
+
+          const baseLinksp = pixAt + 5;
           const baseLinkes = ds.indexOf(';', baseLinksp) - 1;
           const baseLink = ds.substring(baseLinksp, baseLinkes);
 
-          const imageLinksp = ds.indexOf('pvalue=') + 9;
+          const imageLinksp = pvalueAt + 9;
           const imageLinkes = ds.indexOf('"', imageLinksp);
           const imageLink = ds.substring(imageLinksp, imageLinkes);
 
+          // Same trailing soft-404 decoy as the chapter_bar reader; here the tell is that the final
+          // response repeats the previous page's `currentimageid`. Skip rather than break, and take
+          // the page number from the list itself, so a repeat anywhere costs one page and not the
+          // rest of the chapter.
+          const imageId = ds.match(/currentimageid\s*=\s*(\d+)/)?.[1] ?? '';
+          if (isRepeatedImageId(imageId, previousImageId)) continue;
+          previousImageId = imageId;
+
           chapterPages.push({
-            page: i - 1,
+            page: chapterPages.length,
             img: `https:${baseLink}${imageLink}`,
             headerForImage: { Referer: url },
           });
