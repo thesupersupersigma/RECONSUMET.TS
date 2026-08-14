@@ -35,6 +35,7 @@ import { Readable } from 'node:stream';
 import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import { assertUrlSafe, followSafeRedirects, SsrfError } from './ssrf-guard.mjs';
+import mangaRoutes from './manga-routes.mjs';
 import pkg from '../../consumet/dist/index.js';
 
 const { AnimeAggregator } = pkg;
@@ -96,6 +97,10 @@ const RL_TIERS = {
   // Coolify/monitoring health check never risks a false 429, while still capping the sustained,
   // real CPU load an unthrottled root route otherwise lets anyone generate. 0 disables (exempts).
   root: Number(process.env.RATE_LIMIT_ROOT ?? 140),
+  // /manga/image: a reader prefetching chapters fires 20-60 image requests per chapter — bursty,
+  // but nothing like a video's segment storm. Its OWN bucket on purpose: sharing 'proxy' would let
+  // manga reads and video playback evict each other from the same per-IP limit. 0 disables (exempts).
+  image: Number(process.env.RATE_LIMIT_IMAGE ?? 300),
 };
 const API_KEY = process.env.API_KEY || ''; // OFF by default — set to require auth on data routes
 const DEBUG_INFO = /^(1|true)$/i.test(process.env.DEBUG_INFO || '');
@@ -378,6 +383,14 @@ app.get('/', { preHandler: rateLimit('root') }, async () => {
       episodes: 'GET /episodes/:anilistId?provider=Gogoanime',
       watch: 'GET /watch?provider=Gogoanime&episodeId=<id>   (returns proxied sources for sub and dub)',
       proxy: 'GET /proxy?url=<encoded>&ref=<encoded referer>&pk=<encoded>   (HLS/segment/subtitle proxy)',
+      // Manga surface — route shape is final, handlers currently answer 501 (provider triage pending).
+      manga: {
+        search: 'GET /manga/search?q=<query>&page=1',
+        info: 'GET /manga/info/:anilistId   (AniList MANGA id space — NOT the anime id)',
+        chapters: 'GET /manga/chapters/:anilistId?provider=<name>&lang=en',
+        read: 'GET /manga/read?provider=<name>&chapterId=<id>&lang=en',
+        image: 'GET /manga/image?url=<encoded>&ref=<encoded referer>   (Referer-injecting image proxy)',
+      },
     },
   };
   // VM internals (TLS-impersonation host list) only when DEBUG_INFO is set
@@ -562,6 +575,14 @@ app.get('/proxy', { preHandler: rateLimit('proxy') }, async (req, reply) => {
   }
   return reply.send(up.nodeStream);
 });
+
+// ---- manga surface ----
+// Registered from its own module so the video-proxy machinery above and the manga layer stay
+// independently readable. The guards are handed in rather than imported, so manga inherits the
+// EXACT same API-key gate and per-IP tiers as the anime routes with no second implementation.
+// Every handler answers 501 today: the shapes and the SSRF guards are real, the providers are not
+// yet chosen. See api/src/manga-routes.mjs for the full rationale.
+await app.register(mangaRoutes, { apiGuard, rateLimit });
 
 app.setErrorHandler((err, _req, reply) => {
   app.log.error(err);
