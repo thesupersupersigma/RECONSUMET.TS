@@ -39,10 +39,13 @@ interface VyvyMangaSearchResultData {
 
 class VyvyManga extends MangaParser {
   override readonly name: string = 'Vyvymanga';
-  protected override baseUrl: string = 'https://vyvymanga.net/api';
-  protected override logo: string = 'https://vyvymanga.net/web/img/icon.png';
+  // The service was RENAMED, not shut down: `vyvymanga.net` is dead at the origin (Cloudflare 522 on
+  // the apex, on www, on http, on both the HTML and the /api paths). `mangavyvy.net` serves the same
+  // application — identical JSON contract, identical markup — so only these host literals moved.
+  protected override baseUrl: string = 'https://mangavyvy.net/api';
+  protected override logo: string = 'https://mangavyvy.net/web/img/icon.png';
   protected override classPath = 'MANGA.VyvyManga';
-  protected baseWebsiteUrl = 'https://vyvymanga.net';
+  protected baseWebsiteUrl = 'https://mangavyvy.net';
 
   override search = async (query: string, page: number = 1): Promise<ISearch<IMangaResult>> => {
     if (page < 1) throw new Error('page must be equal to 1 or greater');
@@ -59,20 +62,31 @@ class VyvyManga extends MangaParser {
       const result = dom
         .find('.row.book-list > div > div > a')
         .map((index, ele) => {
+          const cover = $(ele).find('div.comic-image');
+          // The cover URL is the id carrier: `.../web/cover/<id>/thumbnail.png`. The card used to
+          // hang that URL on the wrapper div as `data-background-image`; it now lives on a lazy
+          // `<img data-src>` inside it. Read every shape rather than pinning one, because reading
+          // the wrong one does not degrade — `.split()` on `undefined` throws and search dies whole.
+          const image =
+            cover.find('img').attr('data-src') ??
+            cover.attr('data-background-image') ??
+            cover.find('img').attr('src') ??
+            '';
+          // Last resort: the bookmark/preview buttons carry the same numeric id as an attribute.
+          const id = image.match(/\/cover\/(\d+)\b/)?.[1] ?? $(ele).find('[manga_id]').attr('manga_id') ?? '';
+
           return {
-            id: ($(ele).find('div.comic-image').attr('data-background-image') as string)
-              .split('cover/')[1]
-              .split('/')[0],
+            id: id,
             title: $(ele).find('div.comic-title').text().trim(),
-            image: $(ele).find('div.comic-image').attr('data-background-image') as string,
+            image: image,
             lastChapter: $(ele).find('div.comic-image > span').text().trim(),
           };
         })
         .get();
 
-      const pagination = dom.find('ul.pagination > li');
+      const pagination = dom.find('ul.pagination');
 
-      if (!pagination.length) {
+      if (!pagination.find('li').length) {
         return {
           currentPage: page,
           hasNextPage: false,
@@ -81,16 +95,22 @@ class VyvyManga extends MangaParser {
         };
       }
 
-      const lastPage = parseInt(
-        $(pagination[pagination.length - 2])
-          .find('a')
-          .text()
-          .trim()
-      );
+      // Laravel's paginator always renders the last page number, so the largest number anywhere in
+      // the control is the page count — no positional guessing. (The old code read the
+      // second-to-last <li> and pulled its <a>; on the LAST page that <li> is the *active* one, a
+      // <span> with no <a>, so totalPages came back NaN and hasNextPage came back true forever.)
+      const pageNumbers = pagination
+        .find('.page-link')
+        .map((index, ele) => parseInt($(ele).text().trim(), 10))
+        .get()
+        .filter(n => Number.isFinite(n));
+      const lastPage = Math.max(page, ...pageNumbers);
 
       return {
         currentPage: page,
-        hasNextPage: page === lastPage ? false : true,
+        // A `rel="next"` anchor exists only while there is a next page; the disabled Next control is
+        // a <span>. That is exact, so prefer it and fall back to the page-number comparison.
+        hasNextPage: pagination.find('a[rel="next"]').length > 0 || page < lastPage,
         totalPages: lastPage,
         results: result,
       };
@@ -141,14 +161,35 @@ class VyvyManga extends MangaParser {
 
       const title = dom.find('.img-manga').attr('title') as string;
       const img = dom.find('.img-manga').attr('src');
-      const authors = $(dom.find('.col-md-7 > p:nth-child(2) > a'))
+
+      // The info block is a variable-length list of <p>s, each labelled by a <span class="pre-title">
+      // ("Authors", "Artists", "Status", "Genres"). It is NOT fixed-length: titles that credit an
+      // artist carry an extra "Artists" paragraph (manga 55 does, 841 and 97484 do not), which shunts
+      // every later row down one slot. Indexing positionally therefore reads Status out of the
+      // Artists row and Genres out of the Status row for exactly those titles — and because both
+      // lookups then find nothing, the caller gets a silently empty status and empty genres for some
+      // titles only, which is the worst possible way to be wrong. Match on the label instead.
+      const infoRows = dom.find('div.col-md-7').first().children('p');
+      const infoRow = (label: string) =>
+        infoRows.filter(
+          (index, ele) => $(ele).find('span.pre-title').first().text().trim().toLowerCase() === label
+        );
+
+      const authors = infoRow('authors')
+        .find('a')
         .map((index, ele) => $(ele).text().trim())
         .get();
-      const status = $(dom.find('div.col-md-7 > p')[1])
-        .find('span:nth-child(3)')
-        .text()
-        .trim() as MediaStatus;
-      const genres = $(dom.find('div.col-md-7 > p')[2])
+      // The value is the one <span> in the row that is neither the label nor the ":" separator
+      // (its class encodes the state, e.g. `text-ongoing`, so it cannot be selected by class).
+      const statusRow = infoRow('status');
+      const statusText =
+        statusRow.find('span').not('.pre-title').not('.space').last().text().trim() ||
+        statusRow
+          .text()
+          .replace(/^\s*status\s*:?\s*/i, '')
+          .trim();
+      const status = (statusText || MediaStatus.UNKNOWN) as MediaStatus;
+      const genres = infoRow('genres')
         .find('a')
         .map((index, ele) => $(ele).text().trim())
         .get();
@@ -160,6 +201,13 @@ class VyvyManga extends MangaParser {
           const title = $(ele).text().replace(releaseDate, '').trim();
 
           const chapterObj: IMangaChapter = {
+            // NOTE: the chapter id is a full absolute URL, not an opaque token — fetchChapterPages
+            // GETs it verbatim. It is also not even a mangavyvy.net URL: the API hands back a
+            // third-party redirector (`aovheroes.com/rds/...`, itself bouncing on to summonersky.com)
+            // carrying an encrypted blob. So a persisted or cached chapter id pins a hostname AND an
+            // opaque blob that this project does not control, and neither survives a rename or a key
+            // rotation. Anything storing these must re-resolve them from fetchMangaInfo, not migrate
+            // them by string substitution.
             id: $(ele).attr('href') as string,
             title: title,
             releaseDate: releaseDate,
@@ -197,8 +245,14 @@ class VyvyManga extends MangaParser {
       const images: IMangaChapterPage[] = dom
         .find('.vview.carousel-inner > div > img')
         .map((index, ele) => {
+          const src = ($(ele).attr('data-src') as string) ?? '';
           return {
-            img: ($(ele).attr('data-src') as string).slice(0, -5),
+            // Pages are Google/Blogspot-hosted and arrive size-capped with a `=w700` suffix
+            // (`.../AJQWtBN...Nmlqp=w700`). Dropping it yields the full-resolution original — the
+            // same image at 1200px wide instead of 700. This was previously `.slice(0, -5)`, which
+            // is the same 5 characters but silently truncates any URL that lacks the suffix; the
+            // pattern is anchored now so a non-Google host passes through untouched.
+            img: src.replace(/=[ws]\d+$/, ''),
             page: index + 1,
           };
         })
