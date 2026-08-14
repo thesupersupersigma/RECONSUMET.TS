@@ -1,6 +1,7 @@
 import { ANIME, BOOKS, COMICS, LIGHT_NOVELS, MANGA, MOVIES, META, NEWS } from './providers';
 import { PROVIDERS_LIST } from './utils/providers-list';
 import AnimeAggregator from './providers/meta/aggregator';
+import MangaAggregator from './providers/meta/manga-aggregator';
 import {
   VizCloud,
   AsianLoad,
@@ -65,7 +66,7 @@ import {
 
 export { ANIME, BOOKS, COMICS, MANGA, LIGHT_NOVELS, MOVIES, META, NEWS };
 export { PROVIDERS_LIST };
-export { AnimeAggregator };
+export { AnimeAggregator, MangaAggregator };
 export {
   Topics,
   Genres,
