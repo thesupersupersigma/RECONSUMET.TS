@@ -66,12 +66,10 @@ class AniDB extends AnimeParser {
   private readonly impersonateArgs = (process.env.CURL_IMPERSONATE_ARGS || '').split(' ').filter(Boolean);
 
   constructor(customBaseURL?: string, proxy?: ProxyConfig, adapter?: AxiosAdapter) {
-    super(...arguments);
+    super(proxy, adapter);
     if (customBaseURL) {
       this.baseUrl = customBaseURL.startsWith('http') ? customBaseURL : `https://${customBaseURL}`;
     }
-    if (proxy) this.setProxy(proxy);
-    if (adapter) this.setAxiosAdapter(adapter);
   }
 
   /** `/anime/<slug>` (or slug) → slug; slug's trailing digits are the numeric anime id */

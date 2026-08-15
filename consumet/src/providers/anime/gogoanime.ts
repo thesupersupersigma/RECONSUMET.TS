@@ -37,12 +37,10 @@ class Gogoanime extends AnimeParser {
   protected override classPath = 'ANIME.Gogoanime';
 
   constructor(customBaseURL?: string, proxy?: ProxyConfig, adapter?: AxiosAdapter) {
-    super(...arguments);
+    super(proxy, adapter);
     if (customBaseURL) {
       this.baseUrl = customBaseURL.startsWith('http') ? customBaseURL : `https://${customBaseURL}`;
     }
-    if (proxy) this.setProxy(proxy);
-    if (adapter) this.setAxiosAdapter(adapter);
   }
 
   private slugFromAnimeUrl = (href: string): string =>

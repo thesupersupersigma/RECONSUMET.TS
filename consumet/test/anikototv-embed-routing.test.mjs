@@ -59,16 +59,10 @@ const megaplayProtocolHost = origin => ({
   'https://cdn.example/master.m3u8': MASTER,
 });
 
-// NOTE: the constructor's 3rd parameter does NOT reach the extractors — every provider here does
-// `super(...arguments)`, and the base Proxy constructor only takes (proxyConfig, adapter), so the
-// adapter lands in `this.proxyConfig`'s slot and `this.adapter` stays undefined. Set both fields
-// directly instead, so the extractors the provider builds really do run on the fake transport.
-const provider = adapter => {
-  const p = new AnikotoTV();
-  p.client.defaults.adapter = adapter; // the provider's own /ajax calls
-  p.adapter = adapter; // forwarded into `new MegaPlay(...)` / `new VibePlayer(...)`
-  return p;
-};
+// The constructor's 3rd parameter reaches both the provider's own /ajax calls and the extractors
+// it builds (`new MegaPlay(...)` / `new VibePlayer(...)`), so one argument fakes the whole
+// transport. That forwarding is pinned by test/provider-adapter-forwarding.test.mjs.
+const provider = adapter => new AnikotoTV(undefined, undefined, adapter);
 const route = (adapter, embed) => provider(adapter)['extractEmbed'](embed);
 
 describe('AnikotoTV routes an embed by shape, not by pinned host name', () => {
