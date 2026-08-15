@@ -191,13 +191,47 @@
 // @property {string} [volumeNumber]
 // @property {number} [pages]
 // @property {string} [lang]           translated language of this chapter
-// @property {string} [releaseDate]   FORMAT IS PROVIDER-DEPENDENT, not ISO. MangaDex and
-//                                    FlameComics emit an ISO-8601 instant ('2018-01-31T07:07:06.000Z');
-//                                    MangaHere emits the site's own text ('Nov 05,2018'), as do
-//                                    MangaPark and VyvyManga. Since the servability policy landed,
-//                                    MangaHere answers Solo Leveling and One Piece by default, so
-//                                    one caller sees both shapes. Render verbatim, or parse
-//                                    defensively — `new Date(releaseDate)` is not guaranteed.
+// @property {string} [releaseDate]   NORMALISED, and its shape is DECLARED by `releaseDatePrecision`
+//                                    rather than left for you to sniff. Read the two together;
+//                                    `releaseDate` alone is not self-describing and never was.
+//                                    Absent entirely when the provider states no date (MangaPill
+//                                    states none on any chapter — that is permanent, not a gap).
+// @property {'instant'|'day'|'unknown'} [releaseDatePrecision]
+//                                    Present exactly when `releaseDate` is. THE GUARANTEE:
+//                                      'instant' — `releaseDate` is exactly `YYYY-MM-DDTHH:MM:SS.sssZ`,
+//                                                  UTC, millisecond digits always present. Safe to
+//                                                  `new Date()`, safe to compare and SORT AS A STRING.
+//                                      'day'     — exactly `YYYY-MM-DD`. A calendar date with no time
+//                                                  and no zone, because the provider stated none
+//                                                  (MangaHere's 'Nov 05,2018'). We do NOT fabricate a
+//                                                  T00:00:00Z; if you need an instant, you are choosing
+//                                                  the timezone, and that is your call to make.
+//                                                  Sorts correctly against other 'day' values only —
+//                                                  a 'day' and an 'instant' do not sort together.
+//                                      'unknown' — `releaseDate` is THE PROVIDER'S OWN STRING, VERBATIM
+//                                                  and unparsed. Render it as text. `new Date()` on it
+//                                                  may give Invalid Date or a plausible wrong date.
+//                                                  This is what a locale-ambiguous ('03/04/2018'),
+//                                                  relative ('2 days ago') or partial ('Nov 2018') value
+//                                                  becomes: we pass it through rather than guess, and
+//                                                  we say so rather than let it pass for parsed.
+// @property {string} [releaseDateRaw] The provider's original string, present ONLY when normalisation
+//                                    rewrote it. Its presence means "this differs from upstream";
+//                                    its absence means `releaseDate` is upstream's string unchanged
+//                                    EXCEPT for stripped leading/trailing whitespace, which never on
+//                                    its own sets this field. So 'verbatim' above means verbatim once
+//                                    trimmed — worth knowing only if you byte-compare with upstream.
+//                                    Diagnostics/provenance only — do not parse it.
+//
+//   Why any of this exists: the seven registered providers emitted SIX different renderings of this
+//   one field, and AsuraScans alone emitted five of them (0, 2, 3, 5 and 6 fractional-second digits,
+//   its serialiser trimming trailing zeros) inside a SINGLE chapter list. Two spellings of the same
+//   instant break string equality, dedup and cross-provider comparison unconditionally, and they can
+//   also invert a lexicographic sort — '.' is 0x2E and 'Z' is 0x5A, so '...T17:00:56.65804Z' sorts
+//   before '...T17:00:56Z' while being 658 ms later. (That inversion needs two chapters inside the
+//   same second; a 1,039-row live sweep found no such pair, so it is a latent hazard rather than an
+//   observed mis-ordering.) Every instant is now canonicalised to one spelling, so string sort ==
+//   time sort by construction and equality means what it looks like it means.
 // @property {{reason: string, detail?: string}} [unavailable]  listed but unreadable (external/locked/premium)
 //
 // @typedef {Object} MangaPage

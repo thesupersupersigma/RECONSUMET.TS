@@ -23,6 +23,13 @@ import { createMangaMetadataLayer } from './manga-metadata';
 // B3's confidence classifier, imported the same way and for the same reason: ./manga-classifier
 // imports only TYPES back from this file, so there is one require() edge and no cycle.
 import { createMangaMatchClassifier } from './manga-classifier';
+// Release-date normalisation lives in its own leaf module: it imports NOTHING (not even a type),
+// so it can be unit-tested against captured provider strings without constructing an aggregator or
+// touching the network, and this file keeps exactly one call site for it.
+import { normalizeReleaseDate, MangaReleaseDatePrecision } from './manga-release-date';
+// Re-exported because IAggregatedMangaChapter.releaseDatePrecision is typed with it: a consumer
+// importing the chapter type from here must be able to name the union from here too.
+export { normalizeReleaseDate, MangaReleaseDatePrecision, INormalizedReleaseDate } from './manga-release-date';
 
 const ANILIST_GRAPHQL = 'https://graphql.anilist.co';
 
@@ -169,7 +176,28 @@ export interface IAggregatedMangaChapter {
    * it is a fact rather than a guess; undefined when the provider genuinely does not say.
    */
   lang?: string;
+  /**
+   * When the chapter released. NORMALISED — see {@link normalizeReleaseDate} for the full contract
+   * and the live per-provider census. Read it together with {@link releaseDatePrecision}, which is
+   * always present alongside it and says which of three things this string is:
+   *
+   *   'instant' → exactly `YYYY-MM-DDTHH:MM:SS.sssZ` (five providers, canonicalised to one spelling)
+   *   'day'     → exactly `YYYY-MM-DD`, no time and no zone because MangaHere states none
+   *   'unknown' → the provider's own text, unparsed. Render verbatim; `new Date()` is not safe.
+   *
+   * The point of the precision tag is that a pass-through must not be mistakable for a normalised
+   * value. Do not sniff the string to work out which you have — the field tells you.
+   */
   releaseDate?: string;
+  /** Always set when {@link releaseDate} is. Never set when it is not. */
+  releaseDatePrecision?: MangaReleaseDatePrecision;
+  /**
+   * The provider's original string, kept ONLY when normalisation rewrote it (MangaHere's
+   * 'Jan 09,2025', AsuraScans' second-precision instant, MangaKakalot's microsecond one). Its
+   * PRESENCE therefore means "this differs from what the provider said" — absence means the
+   * provider's string is already in {@link releaseDate} unchanged.
+   */
+  releaseDateRaw?: string;
   /** Set when the chapter is listed but known to be unreadable. See {@link IChapterUnavailable}. */
   unavailable?: IChapterUnavailable;
 }
@@ -877,6 +905,24 @@ const chapterUnavailability = (raw: any): IChapterUnavailable | undefined => {
   return undefined;
 };
 
+/**
+ * The three release-date fields, or nothing. One call site, one `firstText` lookup (the old code
+ * ran the same four-key search twice), and all the format knowledge lives in the module next door
+ * so it can be tested without an aggregator.
+ */
+const releaseDateFields = (
+  raw: any
+): { releaseDate?: string; releaseDatePrecision?: MangaReleaseDatePrecision; releaseDateRaw?: string } => {
+  const found = firstText(raw, ['releaseDate', 'releasedDate', 'updatedAt', 'publishAt']);
+  const normalized = normalizeReleaseDate(found);
+  if (!normalized) return {};
+  return {
+    releaseDate: normalized.value,
+    releaseDatePrecision: normalized.precision,
+    ...(normalized.raw !== undefined ? { releaseDateRaw: normalized.raw } : {}),
+  };
+};
+
 /** Normalise one provider chapter to the route contract. `entry` supplies the language fact. */
 const normalizeChapter = (raw: any, traits: IMangaProviderTraits): IAggregatedMangaChapter | null => {
   const id = asText(raw?.id);
@@ -895,15 +941,15 @@ const normalizeChapter = (raw: any, traits: IMangaProviderTraits): IAggregatedMa
     ...(pages !== undefined ? { pages } : {}),
     ...(lang !== undefined ? { lang } : {}),
     // MangaHere misspells this as `releasedDate`; MangaDex/route contract use `releaseDate`.
-    // The resulting string is NOT of one format — MangaDex/FlameComics give ISO-8601, MangaHere
-    // gives 'Nov 05,2018'. Documented on the route typedef; deliberately not normalised here,
-    // because guessing a locale for a scraped string is how a wrong date gets invented.
+    // The RAW string is not of one format — five providers give an ISO instant in three different
+    // spellings, MangaHere gives 'Nov 05,2018', MangaPill gives nothing — so it is normalised, and
+    // the result is TAGGED with what it is rather than leaving a client to sniff the string. The
+    // old reasoning ("guessing a locale is how a wrong date gets invented") is preserved inside
+    // `normalizeReleaseDate`: anything genuinely ambiguous is passed through as 'unknown', untouched.
     // `publishAt` is kept LAST and is a trap if promoted: on MangaDex it is a scheduling field
     // parked on a 2037 sentinel for externally-hosted chapters (see MangaDex.chapterReleaseDate),
     // so it would date exactly the unreadable rows wrongly. No provider emits it today.
-    ...(firstText(raw, ['releaseDate', 'releasedDate', 'updatedAt', 'publishAt']) !== undefined
-      ? { releaseDate: firstText(raw, ['releaseDate', 'releasedDate', 'updatedAt', 'publishAt'])! }
-      : {}),
+    ...releaseDateFields(raw),
     ...(unavailable !== undefined ? { unavailable } : {}),
   };
 };
