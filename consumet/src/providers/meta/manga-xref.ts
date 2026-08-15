@@ -69,12 +69,109 @@ const TITLE_PROBE_LIMIT = 10;
 const TTL_HIT_MS = 6 * 60 * 60 * 1000;
 /** "Looked and it genuinely is not there" — cheap to re-check, but not on every provider. */
 const TTL_MISS_MS = 10 * 60 * 1000;
-/** A transport failure is NOT evidence of absence, so it is barely cached — only enough to stop a
- *  single fan-out from firing the same doomed request once per provider. */
+/**
+ * An upstream REFUSAL — 429, 5xx, 403, timeout, connection error — is NOT evidence of absence, so
+ * it is barely cached: only enough to stop a single fan-out from firing the same doomed request
+ * once per provider, and specifically to stop a 429 being answered with an immediate retry.
+ *
+ * THIS CONSTANT WAS DECLARED AND NEVER REFERENCED. Everything non-200 fell through to
+ * TTL_MISS_MS = 10 minutes, so one rate-limited request cached "no mapping" for ten minutes.
+ * See the section below for why the fix is a representation change and not just a TTL change.
+ */
 const TTL_ERROR_MS = 30 * 1000;
 
 /** Entries kept per cache. Small: one entry per series actually requested in the last few hours. */
 const CACHE_MAX = 500;
+
+// =============================================================================================
+// "NO DATA" IS TWO DIFFERENT ANSWERS AND THEY MUST NOT SHARE A REPRESENTATION
+//
+// THE BUG THIS SECTION EXISTS TO KILL. Every lookup in this file degrades to a falsy value on
+// failure — `null` for MAL-Sync and MangaDex, `[]` for the alias resolver. That same falsy value
+// is ALSO the legitimate answer "upstream looked and there is genuinely no mapping". Collapsing
+// the two costs twice:
+//
+//   1. THE CACHE POISONS ITSELF. A caller cannot tell them apart, so neither could the TTL
+//      function, so a 429 used to be cached for TTL_MISS_MS = 10 minutes as though MAL-Sync had
+//      asserted "no such series". One rate-limited request became ten minutes of a confidently
+//      wrong answer, on a layer whose entire purpose is to stop confidently wrong answers.
+//   2. THE CALLER CANNOT DEGRADE HONESTLY. "MAL-Sync says there is no MangaHere record" and
+//      "MAL-Sync refused to answer" call for different behaviour upstream of here — the first is
+//      a fact worth remembering, the second is a reason to keep the weaker path's label honest.
+//      Shortening the TTL alone fixes (1) and leaves (2) exactly as broken.
+//
+// This is the same shape as the fail-open providers deleted in Phase 3: HTTP 200 with an empty
+// array, so every health check called them healthy. The fix, here and there, is that an upstream
+// refusal must be REPRESENTABLE, not merely short-lived.
+//
+// So every cached answer is an {@link IXrefResult}: the degraded value the legacy API still
+// returns, plus a `fault` that is null iff upstream actually answered. `*Result()` methods expose
+// it; the pre-existing methods keep their exact old signatures for the bridges in
+// ./manga-metadata.ts and the alias path in ../manga/mangakakalot.ts.
+// =============================================================================================
+
+/**
+ * Why a lookup produced no data. NONE of these is evidence of absence — that is the whole point of
+ * separating them from a real 404 / real empty result.
+ */
+export type XrefFaultKind =
+  /** HTTP 429, or an upstream that signals throttling in-band (AniList: HTTP 200 + errors[]). */
+  | 'rate-limited'
+  /** HTTP 5xx — upstream is broken, and says so. */
+  | 'server-error'
+  /** Any other non-200 that is not the documented "no mapping" answer (403 Cloudflare, 400, …). */
+  | 'unexpected-status'
+  /** The request threw: DNS, connect refused, TLS, timeout, abort. Nothing was ever answered. */
+  | 'transport';
+
+/** One upstream refusal, in enough detail for a caller to log or branch on without re-deriving it. */
+export interface IXrefFault {
+  kind: XrefFaultKind;
+  /** Which upstream refused, e.g. 'malsync', 'mangadex', 'anilist-alias'. */
+  source: string;
+  /** The HTTP status, when there was one at all (absent for `transport`). */
+  status?: number;
+  /** Already-sanitised human-readable detail. Safe to log. */
+  detail: string;
+}
+
+/**
+ * A lookup answer plus whether it is a FACT ABOUT THE DATA or an upstream refusal.
+ *
+ * `fault === null` means upstream answered: `value` is either the real record or a real "not
+ * there". `fault !== null` means `value` is a degraded placeholder and means nothing.
+ */
+export interface IXrefResult<T> {
+  value: T;
+  fault: IXrefFault | null;
+}
+
+/** Upstream answered. `value` is a fact — a record, or a genuine absence. */
+export const xrefAnswer = <T>(value: T): IXrefResult<T> => ({ value, fault: null });
+
+/** Upstream refused. `value` is only the degraded placeholder the legacy API returns. */
+export const xrefFault = <T>(value: T, fault: IXrefFault): IXrefResult<T> => ({ value, fault });
+
+/**
+ * Classify a non-200 status. The caller has already peeled off whatever status means "no mapping"
+ * for that endpoint (404 on MAL-Sync), so everything reaching here is a refusal by definition.
+ */
+export const faultForStatus = (status: number, source: string, detail?: string): IXrefFault => ({
+  kind: status === 429 ? 'rate-limited' : status >= 500 ? 'server-error' : 'unexpected-status',
+  source,
+  status,
+  detail: detail ?? `HTTP ${status}`,
+});
+
+/** Classify a thrown request. Timeouts and connection failures are indistinguishable to a caller. */
+export const faultForError = (err: unknown, source: string): IXrefFault => ({
+  kind: 'transport',
+  source,
+  detail: safeErrorString(err),
+});
+
+/** One line describing a fault, for logs that must not assert "no mapping". */
+const faultLine = (fault: IXrefFault): string => `${fault.kind} (${fault.detail})`;
 
 // =============================================================================================
 // A TINY TTL CACHE WITH IN-FLIGHT DEDUPLICATION
@@ -89,22 +186,35 @@ const CACHE_MAX = 500;
  * providers x two bridges is up to six simultaneous identical MAL-Sync requests for one call —
  * all issued before any of them could have populated a plain value cache. With it, the fan-out
  * costs exactly one upstream request and the other five await the same promise.
+ *
+ * THE TTL IS CHOSEN FROM THE OUTCOME, NOT FROM THE VALUE. That distinction is the fix for the
+ * cache-poisoning bug documented above: `isHit` only ever sees a value upstream actually vouched
+ * for, because a faulted result takes TTL_ERROR_MS before `isHit` is consulted at all. 30 seconds
+ * is deliberately kept rather than dropped to zero — retrying a 429 immediately is the one
+ * response guaranteed to make a rate limit worse, and the window is short enough that a caller
+ * that waits out one fan-out gets a real answer.
  */
-class TtlCache<K, V> {
-  private readonly values = new Map<K, { value: V; expiresAt: number }>();
-  private readonly inFlight = new Map<K, Promise<V>>();
+class TtlResultCache<K, V> {
+  private readonly values = new Map<K, { result: IXrefResult<V>; expiresAt: number }>();
+  private readonly inFlight = new Map<K, Promise<IXrefResult<V>>>();
 
   /** Diagnostics only — `describe()` on the layer reports these. */
   hits = 0;
   misses = 0;
+  /** Answers stored as an upstream REFUSAL rather than as a fact. A rising count is an outage. */
+  faults = 0;
 
-  constructor(private readonly ttlFor: (value: V) => number) {}
+  /** Given a value upstream vouched for, is it a real record (TTL_HIT_MS) or a real absence? */
+  constructor(private readonly isHit: (value: V) => boolean) {}
 
-  get = async (key: K, load: () => Promise<V>): Promise<V> => {
+  private ttlFor = (result: IXrefResult<V>): number =>
+    result.fault ? TTL_ERROR_MS : this.isHit(result.value) ? TTL_HIT_MS : TTL_MISS_MS;
+
+  get = async (key: K, load: () => Promise<IXrefResult<V>>): Promise<IXrefResult<V>> => {
     const cached = this.values.get(key);
     if (cached && cached.expiresAt > Date.now()) {
       this.hits++;
-      return cached.value;
+      return cached.result;
     }
     const pending = this.inFlight.get(key);
     if (pending) {
@@ -113,14 +223,15 @@ class TtlCache<K, V> {
     }
     this.misses++;
     const promise = load()
-      .then(value => {
+      .then(result => {
+        if (result.fault) this.faults++;
         // Map preserves insertion order, so the first key is the oldest — a one-line LRU-ish bound.
         if (this.values.size >= CACHE_MAX) {
           const oldest = this.values.keys().next();
           if (!oldest.done) this.values.delete(oldest.value);
         }
-        this.values.set(key, { value, expiresAt: Date.now() + this.ttlFor(value) });
-        return value;
+        this.values.set(key, { result, expiresAt: Date.now() + this.ttlFor(result) });
+        return result;
       })
       .finally(() => {
         this.inFlight.delete(key);
@@ -399,7 +510,7 @@ export const pickSiteEntry = (
 
 /** MAL-Sync client: one memoised, deduplicated GET per MAL id. */
 export class MalSyncIndex {
-  private readonly cache = new TtlCache<number, IMalSyncPayload | null>(v => (v ? TTL_HIT_MS : TTL_MISS_MS));
+  private readonly cache = new TtlResultCache<number, IMalSyncPayload | null>(v => v !== null);
 
   constructor(
     private readonly client: AxiosInstance,
@@ -407,12 +518,15 @@ export class MalSyncIndex {
   ) {}
 
   /**
-   * `null` means "MAL-Sync has no mapping" (a real 404 — verified live with malId 99999999) or the
-   * request failed. Never throws: a bridge that throws is caught by the aggregator, but returning
-   * null keeps the resolver's best-effort enrichment path simple.
+   * The full answer: the payload (or null) PLUS whether MAL-Sync actually answered.
+   *
+   * `{ value: null, fault: null }` is "MAL-Sync has no mapping" — a real 404, verified live with
+   * malId 99999999, and a durable fact worth caching for TTL_MISS_MS. `{ value: null, fault: {…} }`
+   * is "MAL-Sync refused", which is not a fact about the series at all and is cached for
+   * TTL_ERROR_MS so the next fan-out can get a real answer. Never throws.
    */
-  lookup = async (malId: number): Promise<IMalSyncPayload | null> => {
-    if (!Number.isFinite(malId) || malId <= 0) return null;
+  lookupResult = async (malId: number): Promise<IXrefResult<IMalSyncPayload | null>> => {
+    if (!Number.isFinite(malId) || malId <= 0) return xrefAnswer(null);
     return this.cache.get(malId, async () => {
       try {
         const { data, status } = await this.client.get(`${this.baseUrl}/mal/manga/${malId}`, {
@@ -420,24 +534,36 @@ export class MalSyncIndex {
           // throw on it would turn an ordinary miss into a logged bridge failure.
           validateStatus: () => true,
         });
-        if (status === 404) return null;
+        if (status === 404) return xrefAnswer(null);
         if (status !== 200) {
+          const fault = faultForStatus(status, 'malsync');
+          // NOT "treating as no mapping" — that was the conflation. We do not know whether a
+          // mapping exists; we know only that MAL-Sync would not tell us.
           console.warn(
-            `[manga-xref] MAL-Sync /mal/manga/${malId} answered HTTP ${status} — treating as "no mapping" ` +
-              `for this call (upstream fault, not a provider fault)`
+            `[manga-xref] MAL-Sync /mal/manga/${malId} answered HTTP ${status} — UNKNOWN whether a ` +
+              `mapping exists (${faultLine(fault)}); the id bridge is skipped for now and this is ` +
+              `cached for ${TTL_ERROR_MS}ms only, NOT as a "no mapping" result`
           );
-          return null;
+          return xrefFault<IMalSyncPayload | null>(null, fault);
         }
-        return (data ?? null) as IMalSyncPayload | null;
+        return xrefAnswer((data ?? null) as IMalSyncPayload | null);
       } catch (err) {
+        const fault = faultForError(err, 'malsync');
         console.error(
-          `[manga-xref] MAL-Sync /mal/manga/${malId} FAILED (degrading to no id bridge, title ` +
-            `matching still runs): ${safeErrorString(err)}`
+          `[manga-xref] MAL-Sync /mal/manga/${malId} FAILED — UNKNOWN whether a mapping exists ` +
+            `(${faultLine(fault)}); degrading to no id bridge, title matching still runs`
         );
-        return null;
+        return xrefFault<IMalSyncPayload | null>(null, fault);
       }
     });
   };
+
+  /**
+   * Legacy shape, unchanged for the bridges in ./manga-metadata.ts: the payload, or null for
+   * EITHER "no mapping" or "upstream refused". Callers that need to tell those apart — and the
+   * confidence labelling arguably should — must use {@link lookupResult}.
+   */
+  lookup = async (malId: number): Promise<IMalSyncPayload | null> => (await this.lookupResult(malId)).value;
 
   /** Every entry MAL-Sync lists for one site, in payload order. */
   entriesForSite = (payload: IMalSyncPayload | null, site: string): IMalSyncEntry[] => {
@@ -453,7 +579,7 @@ export class MalSyncIndex {
 
   clearCache = (): void => this.cache.clear();
 
-  stats = () => ({ hits: this.cache.hits, misses: this.cache.misses });
+  stats = () => ({ hits: this.cache.hits, misses: this.cache.misses, faults: this.cache.faults });
 }
 
 // =============================================================================================
@@ -541,7 +667,7 @@ const toRecord = (raw: any, matchedBy: IMangaDexRecord['matchedBy']): IMangaDexR
  * whole provider fan-out. Never throws.
  */
 export class MangaDexXref {
-  private readonly cache = new TtlCache<string, IMangaDexRecord | null>(v => (v ? TTL_HIT_MS : TTL_MISS_MS));
+  private readonly cache = new TtlResultCache<string, IMangaDexRecord | null>(v => v !== null);
 
   constructor(
     private readonly client: AxiosInstance,
@@ -549,35 +675,67 @@ export class MangaDexXref {
     private readonly baseUrl: string = MANGADEX_API
   ) {}
 
-  resolve = async (meta: IMangaMeta): Promise<IMangaDexRecord | null> => {
+  /**
+   * The full answer: the record (or null) PLUS whether every upstream on the path actually
+   * answered.
+   *
+   * A FAULT ANYWHERE ON THE PATH POISONS THE "NOT FOUND". If MAL-Sync 429s, its candidate UUIDs
+   * never reach the batch verifier, so a subsequent empty title search is not evidence that no
+   * MangaDex record exists — the strongest path was simply never walked. So the fault propagates
+   * and the null is cached for TTL_ERROR_MS, not TTL_MISS_MS. A found record clears it: an answer
+   * is an answer however it was reached.
+   */
+  resolveResult = async (meta: IMangaMeta): Promise<IXrefResult<IMangaDexRecord | null>> => {
     const anilistId = String(meta?.anilistId ?? '').trim();
-    if (anilistId === '') return null;
+    if (anilistId === '') return xrefAnswer(null);
     return this.cache.get(anilistId, async () => {
+      // The FIRST fault on the path is kept: it is the earliest cause, and the later steps are
+      // only running because of it.
+      let fault: IXrefFault | null = null;
       try {
         const viaMalSync = await this.viaMalSync(meta, anilistId);
-        if (viaMalSync) return viaMalSync;
-        return await this.viaTitleSearch(meta, anilistId);
+        if (viaMalSync.value) return xrefAnswer(viaMalSync.value);
+        fault = viaMalSync.fault;
+
+        const viaTitle = await this.viaTitleSearch(meta, anilistId);
+        if (viaTitle.value) return xrefAnswer(viaTitle.value);
+        fault = fault ?? viaTitle.fault;
       } catch (err) {
+        fault = faultForError(err, 'mangadex');
         console.error(
-          `[manga-xref] MangaDex cross-reference for AniList manga id ${anilistId} FAILED ` +
-            `(degrading to no verified MangaDex record; title matching still runs): ${safeErrorString(err)}`
+          `[manga-xref] MangaDex cross-reference for AniList manga id ${anilistId} FAILED — UNKNOWN ` +
+            `whether a MangaDex record exists (${faultLine(fault)}); degrading to no verified record, ` +
+            `title matching still runs`
         );
-        return null;
       }
+      return fault ? xrefFault<IMangaDexRecord | null>(null, fault) : xrefAnswer(null);
     });
   };
 
+  /**
+   * Legacy shape, unchanged for `VerifiedMangaMetadataResolver`: the record, or null for EITHER
+   * "no MangaDex record carries this AniList id" or "an upstream on the path refused". Use
+   * {@link resolveResult} to tell those apart.
+   */
+  resolve = async (meta: IMangaMeta): Promise<IMangaDexRecord | null> => (await this.resolveResult(meta)).value;
+
   /** Step 1 — MAL-Sync proposes UUIDs, `links.al` disposes. Zero title comparison. */
-  private viaMalSync = async (meta: IMangaMeta, anilistId: string): Promise<IMangaDexRecord | null> => {
-    if (!this.malsync || !meta.malId) return null;
-    const payload = await this.malsync.lookup(meta.malId);
+  private viaMalSync = async (
+    meta: IMangaMeta,
+    anilistId: string
+  ): Promise<IXrefResult<IMangaDexRecord | null>> => {
+    if (!this.malsync || !meta.malId) return xrefAnswer(null);
+    const malsync = await this.malsync.lookupResult(meta.malId);
+    // MAL-Sync refusing is not "MAL-Sync has no Mangadex candidates". Carry it forward so a later
+    // empty title search cannot be mistaken for a verified absence.
+    if (malsync.fault) return xrefFault<IMangaDexRecord | null>(null, malsync.fault);
     const ids = this.malsync
-      .entriesForSite(payload, 'Mangadex')
+      .entriesForSite(malsync.value, 'Mangadex')
       .map(identifierAsId)
       // A MangaDex id is a v4 UUID. Anything else in this field is not one, and sending it to
       // `ids[]` earns a 400 for the whole batch, taking the good candidates down with it.
       .filter((id): id is string => id !== null && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id));
-    if (ids.length === 0) return null;
+    if (ids.length === 0) return xrefAnswer(null);
 
     const { data, status } = await this.client.get(`${this.baseUrl}/manga`, {
       // NOTE THE BARE KEYS. MangaDex wants `?ids[]=x&ids[]=y`, but axios appends the `[]` ITSELF
@@ -594,18 +752,24 @@ export class MangaDexXref {
       validateStatus: () => true,
     });
     if (status !== 200) {
+      const fault = faultForStatus(status, 'mangadex');
       console.warn(
         `[manga-xref] MangaDex /manga?ids[] answered HTTP ${status} while verifying ${ids.length} ` +
-          `MAL-Sync candidate(s) for AniList manga id ${anilistId} — falling back to title search`
+          `MAL-Sync candidate(s) for AniList manga id ${anilistId} (${faultLine(fault)}) — falling back ` +
+          `to title search; these candidates remain UNVERIFIED, not disproved`
       );
-      return null;
+      return xrefFault<IMangaDexRecord | null>(null, fault);
     }
-    return this.pickByAnilistLink(data?.data, anilistId, 'malsync-then-links.al');
+    return xrefAnswer(this.pickByAnilistLink(data?.data, anilistId, 'malsync-then-links.al'));
   };
 
   /** Step 2 — a title only builds the candidate set; `links.al` still decides. */
-  private viaTitleSearch = async (meta: IMangaMeta, anilistId: string): Promise<IMangaDexRecord | null> => {
+  private viaTitleSearch = async (
+    meta: IMangaMeta,
+    anilistId: string
+  ): Promise<IXrefResult<IMangaDexRecord | null>> => {
     const probes = meta.titles.filter(t => typeof t === 'string' && t.trim() !== '').slice(0, TITLE_PROBES);
+    let fault: IXrefFault | null = null;
     for (const title of probes) {
       const { data, status } = await this.client.get(`${this.baseUrl}/manga`, {
         // Bare `contentRating` key for the same reason as in viaMalSync — axios adds the `[]`.
@@ -617,16 +781,19 @@ export class MangaDexXref {
         validateStatus: () => true,
       });
       if (status !== 200) {
+        const probeFault = faultForStatus(status, 'mangadex');
+        fault = fault ?? probeFault;
         console.warn(
           `[manga-xref] MangaDex /manga?title="${title}" answered HTTP ${status} for AniList manga id ` +
-            `${anilistId} — trying the next title, if any`
+            `${anilistId} (${faultLine(probeFault)}) — trying the next title, if any; this probe proves ` +
+            `NOTHING about whether the record exists`
         );
         continue;
       }
       const hit = this.pickByAnilistLink(data?.data, anilistId, 'title-search-then-links.al');
-      if (hit) return hit;
+      if (hit) return xrefAnswer(hit);
     }
-    return null;
+    return fault ? xrefFault<IMangaDexRecord | null>(null, fault) : xrefAnswer(null);
   };
 
   /**
@@ -648,7 +815,7 @@ export class MangaDexXref {
 
   clearCache = (): void => this.cache.clear();
 
-  stats = () => ({ hits: this.cache.hits, misses: this.cache.misses });
+  stats = () => ({ hits: this.cache.hits, misses: this.cache.misses, faults: this.cache.faults });
 }
 
 // =============================================================================================
@@ -788,9 +955,14 @@ const ALIAS_QUERY = `query ($search: String, $perPage: Int) {
  * exactly where it was before this class existed.
  */
 export class MangaAliasResolver {
-  private readonly cache = new TtlCache<string, IMangaAliasCandidate[]>(v =>
-    v.length ? TTL_HIT_MS : TTL_MISS_MS
-  );
+  /**
+   * NOTE THE `isHit` PREDICATE, AND WHY IT IS ONLY SAFE NOW. An empty array is a LEGITIMATE result
+   * here — AniList genuinely carries no manga matching the query above ALIAS_MIN_SIMILARITY — and
+   * it used to double as the failure value, so `v.length ? … : TTL_MISS_MS` cached a 429 as
+   * "AniList has never heard of this series" for ten minutes. `TtlResultCache` only consults this
+   * predicate for a value AniList actually vouched for; a refusal takes TTL_ERROR_MS instead.
+   */
+  private readonly cache = new TtlResultCache<string, IMangaAliasCandidate[]>(v => v.length > 0);
 
   constructor(
     private readonly client: AxiosInstance,
@@ -813,9 +985,9 @@ export class MangaAliasResolver {
    * is still the right default — the spin-offs stay in the list, just below — but it is a ranking
    * heuristic and must not be read as an identification.
    */
-  resolve = async (query: string): Promise<IMangaAliasCandidate[]> => {
+  resolveResult = async (query: string): Promise<IXrefResult<IMangaAliasCandidate[]>> => {
     const key = normalizeTitle(query);
-    if (!key) return [];
+    if (!key) return xrefAnswer([]);
     return this.cache.get(key, async () => {
       let payload: any;
       try {
@@ -828,34 +1000,46 @@ export class MangaAliasResolver {
           }
         );
         if (status !== 200) {
+          const fault = faultForStatus(status, 'anilist-alias');
           console.warn(
             `[manga-xref] AniList alias search for "${query}" answered HTTP ${status} — no aliases for ` +
-              `this query (upstream fault, NOT "the series does not exist")`
+              `this query (${faultLine(fault)}; an upstream fault, NOT "the series does not exist")`
           );
-          return [];
+          return xrefFault<IMangaAliasCandidate[]>([], fault);
         }
         payload = data;
       } catch (err) {
+        const fault = faultForError(err, 'anilist-alias');
         console.error(
           `[manga-xref] AniList alias search for "${query}" FAILED (no aliases; the caller's own ` +
-            `matching still runs): ${safeErrorString(err)}`
+            `matching still runs): ${faultLine(fault)}`
         );
-        return [];
+        return xrefFault<IMangaAliasCandidate[]>([], fault);
       }
 
       // AniList signals rate limiting as HTTP 200 with a populated errors[] and null data. Reading
-      // that as "no such series" is precisely the silent degradation this layer exists to stop.
+      // that as "no such series" is precisely the silent degradation this layer exists to stop —
+      // and caching it as one for TTL_MISS_MS was the version of that mistake this cache used to
+      // make, because [] was both the failure value and a legitimate answer.
       const errors = graphqlErrorsSummary(payload);
       if (errors) {
+        const fault: IXrefFault = {
+          // AniList's throttle arrives as an in-band error, so an explicit rate-limit mention is
+          // the only way to classify it; anything else is an unattributed upstream fault.
+          kind: /rate|too many requests|429|throttl/i.test(errors) ? 'rate-limited' : 'unexpected-status',
+          source: 'anilist-alias',
+          status: 200,
+          detail: `HTTP 200 with GraphQL errors: ${errors}`,
+        };
         console.error(
           `[manga-xref] AniList alias search for "${query}" returned HTTP 200 WITH errors — treating as ` +
             `an upstream fault, NOT as "no matches": ${errors}`
         );
-        return [];
+        return xrefFault<IMangaAliasCandidate[]>([], fault);
       }
 
       const media: AniListAliasMedia[] = payload?.data?.Page?.media ?? [];
-      if (!Array.isArray(media)) return [];
+      if (!Array.isArray(media)) return xrefAnswer([]);
 
       const candidates: IMangaAliasCandidate[] = [];
       for (const entry of media) {
@@ -889,9 +1073,17 @@ export class MangaAliasResolver {
         });
       }
 
-      return candidates.sort((a, b) => b.similarity - a.similarity || b.popularity - a.popularity);
+      return xrefAnswer(candidates.sort((a, b) => b.similarity - a.similarity || b.popularity - a.popularity));
     });
   };
+
+  /**
+   * Legacy shape, unchanged for `MangaKakalot`'s alias bridge: candidates, or `[]` for EITHER
+   * "AniList carries nothing close enough" or "AniList refused". Use {@link resolveResult} to tell
+   * those apart — an empty array is the one place in this file where the degraded value is also a
+   * perfectly ordinary answer.
+   */
+  resolve = async (query: string): Promise<IMangaAliasCandidate[]> => (await this.resolveResult(query)).value;
 
   /**
    * The provider's own identifier for `candidate`, via MAL-Sync, or null.
@@ -905,8 +1097,16 @@ export class MangaAliasResolver {
     if (!binding) return null;
 
     try {
-      const payload = await this.malsync.lookup(candidate.malId);
-      const entries = this.malsync.entriesForSite(payload, binding.site);
+      const malsync = await this.malsync.lookupResult(candidate.malId);
+      if (malsync.fault) {
+        console.warn(
+          `[manga-xref] MAL-Sync alias bridge for AniList manga id ${candidate.anilistId} → ` +
+            `${providerName}: UNKNOWN whether ${binding.site} lists this series ` +
+            `(${faultLine(malsync.fault)}) — falling back to slugified titles`
+        );
+        return null;
+      }
+      const entries = this.malsync.entriesForSite(malsync.value, binding.site);
       if (!entries.length) return null;
       // pickSiteEntry drops entries whose `aniId` disagrees with the AniList id — a free hard check
       // that the MAL id we followed really does lead back to the series AniList named.
@@ -928,5 +1128,5 @@ export class MangaAliasResolver {
 
   clearCache = (): void => this.cache.clear();
 
-  stats = () => ({ hits: this.cache.hits, misses: this.cache.misses });
+  stats = () => ({ hits: this.cache.hits, misses: this.cache.misses, faults: this.cache.faults });
 }
