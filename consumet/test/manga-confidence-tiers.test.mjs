@@ -59,6 +59,7 @@ const {
   normalizeTitle,
   MANGA_CLASSIFIER_SIGNAL_COVERAGE,
 } = clsMod;
+const { PROVIDERS_WITHOUT_MALSYNC_COVERAGE } = require('../dist/providers/meta/manga-xref.js');
 
 /** Swallow the diagnostic logs and hand them back, so tests can assert on them. */
 const capture = async fn => {
@@ -725,17 +726,27 @@ describe('the classifier is total and self-documenting', () => {
 
   test('the signal-coverage table names every registered provider and states its limits', () => {
     const registered = new MangaAggregator().providerNames;
-    assert.equal(registered.length, 6);
+    assert.equal(registered.length, 7); // 7 since MangaKakalot joined in wave 3
     const covered = MANGA_CLASSIFIER_SIGNAL_COVERAGE.map(c => c.provider);
     for (const name of registered)
       assert.ok(covered.includes(name), `${name} is registered but absent from the coverage table`);
     for (const row of MANGA_CLASSIFIER_SIGNAL_COVERAGE)
       assert.ok(row.note && row.note.length > 20, `${row.provider} has no note — an unexplained row is folklore`);
 
-    // The documented limit, asserted so it cannot rot into an unnoticed claim: two providers supply
-    // NO non-title field, so tier 2 is unreachable for them.
+    // The documented limit, asserted so it cannot rot into an unnoticed claim: THREE providers now
+    // supply NO non-title field, so tier 2 is unreachable for them. MangaKakalot is the third —
+    // measured live 2026-08-14, its search rows are id/title/image/description only. It is listed
+    // here rather than quietly given a year it does not emit; registering a provider is not
+    // permission to invent a signal for it.
     const blind = MANGA_CLASSIFIER_SIGNAL_COVERAGE.filter(c => !c.year && !c.type).map(c => c.provider);
-    assert.deepEqual(blind.sort(), ['MangaHere', 'MangaPill']);
+    assert.deepEqual(blind.sort(), ['MangaHere', 'MangaKakalot', 'MangaPill']);
+
+    // ...but "blind" is not "hopeless", and the difference is what the note has to carry. MangaPill
+    // is the only registered provider that is BOTH signal-blind and unbridged, i.e. permanently
+    // capped at 'unverified'. MangaHere and MangaKakalot are bridged by MAL-Sync and reach
+    // 'exact-id' routinely.
+    const unbridged = blind.filter(p => PROVIDERS_WITHOUT_MALSYNC_COVERAGE.includes(p));
+    assert.deepEqual(unbridged, ['MangaPill'], 'only MangaPill is both signal-blind and unbridged');
   });
 
   test('the description states what it refuses to do and why', () => {

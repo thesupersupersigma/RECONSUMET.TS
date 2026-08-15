@@ -12,6 +12,11 @@ import MangaPill from '../manga/mangapill';
 import AsuraScans from '../manga/asurascans';
 import FlameScans from '../manga/flamescans';
 import Mangasee123 from '../manga/mangasee123';
+// `MangaKakalot` is the class name only — the host it scrapes is www.manganato.gg. Its own module
+// pulls in ../meta/manga-xref for the AniList/MAL-Sync alias bridge; manga-xref imports nothing
+// from here but a TYPE (`IMangaMeta`), which is erased in the emitted CommonJS, so this adds one
+// require() edge and no cycle — the same argument as manga-metadata and manga-classifier below.
+import MangaKakalot from '../manga/mangakakalot';
 // B2's metadata layer. Imported for its FACTORY only — ./manga-metadata imports nothing but types
 // back from this file, so the emitted CommonJS has a single require() edge and no cycle.
 import { createMangaMetadataLayer } from './manga-metadata';
@@ -400,24 +405,28 @@ export const DEFAULT_TRAITS: IMangaProviderTraits = {
 // ---------------------------------------------------------------------------------------------
 // THE WORKING SET.
 //
-// SIX providers now, up from three. MangaDex, MangaHere and MangaPill were the wave-1 working set;
-// AsuraScans, FlameComics and WeebCentral were rewritten against their current hosts in wave 2 and
-// are registered here only because each was re-verified END TO END from the built dist/ before the
-// entry was written — search -> fetchMangaInfo -> chapter list -> fetchChapterPages -> an actual
-// GET of page 1 confirming magic bytes and a plausible length. A provider whose pipeline could not
-// be walked in full does NOT get an entry; a green unit suite is not evidence that a host answers.
+// SEVEN providers now, up from three. MangaDex, MangaHere and MangaPill were the wave-1 working
+// set; AsuraScans, FlameComics and WeebCentral were rewritten against their current hosts in wave 2;
+// MangaKakalot joined in wave 3. Each is registered here only because it was re-verified END TO END
+// before the entry was written — search -> fetchMangaInfo -> chapter list -> fetchChapterPages ->
+// an actual GET of page 1 confirming magic bytes and a plausible length. A provider whose pipeline
+// could not be walked in full does NOT get an entry; a green unit suite is not evidence that a host
+// answers.
 //
-// Providers still absent are absent on purpose: VyvyManga and MangaKakalot are unrepaired, ComicK
-// is unverified (its API 301s), and brmangas/mangahost/mangareader/readmanga were deleted. This
-// file imports none of them — a provider that ships broken must not break the module graph.
+// Providers still absent are absent on purpose: ComicK and MangaPark are out of scope repo-wide,
+// brmangas/mangahost/mangareader/readmanga were deleted, and VyvyManga is REPAIRED BUT DELIBERATELY
+// UNREGISTERED — see the block comment immediately after the registry for the measurements that
+// disqualified it. This file imports none of them; a provider that would answer wrongly must not be
+// in the default working set, and a provider that ships broken must not break the module graph.
 //
-// EVERY `imageHeaders` BELOW IS A MEASUREMENT, NOT A COPY OF WHAT THE PROVIDER EMITS. The three
-// new CDNs were each fetched three ways — correct Referer, no Referer, and a hostile
+// EVERY `imageHeaders` BELOW IS A MEASUREMENT, NOT A COPY OF WHAT THE PROVIDER EMITS. The wave-2
+// CDNs were each fetched three ways — correct Referer, no Referer, and a hostile
 // `https://evil.example.com/` — and returned byte-identical 200s every time, so all three take
 // `{}`. AsuraScans and WeebCentral still stamp a Referer on their own page objects for parity with
 // their siblings; that is cosmetic, and these traits are what a caller should actually believe.
-// (Contrast MangaPill, whose CDN really does 403 without one.) Caveat inherited from the wave:
-// every such probe ran from a RESIDENTIAL IP. See the note on each entry.
+// (Contrast MangaPill and MangaKakalot, whose CDNs really do 403 without one — and MangaKakalot's
+// is fussier still: only ONE exact Referer string works. See its entry.) Caveat inherited from the
+// wave: every such probe ran from a RESIDENTIAL IP. See the note on each entry.
 // ---------------------------------------------------------------------------------------------
 export const defaultProviderRegistry = (): { parser: MangaParser; traits: IMangaProviderTraits }[] => [
   {
@@ -566,7 +575,104 @@ export const defaultProviderRegistry = (): { parser: MangaParser; traits: IManga
       imageHeaders: {},
     },
   },
+  {
+    parser: new MangaKakalot(),
+    traits: {
+      // Bare series slug ('kimetsu-no-yaiba', 'one-piece'). NOTE the CHAPTER id is
+      // '<slug>/<chapter-slug>' and therefore CONTAINS A SLASH, exactly like AsuraScans — anything
+      // putting a chapter id in a URL path rather than a query parameter must encode it.
+      idShape: 'slug',
+      langModel: 'none', // English-only site; there is no language axis to filter on
+      langs: ['en'],
+      // MEASURED 2026-08-14, and the measurement is a CEILING, not this number: 12 parallel
+      // requests to /api/manga/<slug>/chapters all answered 200 in 458 ms (~26 req/s), and 30
+      // serial requests all answered 200 with no 429, no Retry-After and no `cf-mitigated` header.
+      // So no throttle was found. 6 is nevertheless a deliberate policy choice: the host is
+      // Cloudflare-fronted and ALREADY serves managed challenges on its own search paths, so
+      // provoking the edge would cost the whole provider, not one request. Two things ride on this
+      // number — a cold search is ~20 gated requests (~3.3 s of gating at 6 req/s), and because the
+      // alias bridge uses the provider's OWN axios client, the AniList and MAL-Sync calls are gated
+      // at this rate too. Lowering it slows alias resolution as much as it slows manganato.
+      requestsPerSecond: 6,
+      // 20, and NOT caller-settable — the same shape as WeebCentral's 32, with a different cause.
+      // `search()` is `(query, page)`: the third argument the aggregator passes is silently ignored
+      // and the page size is the module constant RESULTS_PER_PAGE. Measured: `search('one', 1, 5)`
+      // returns 20 rows out of 2,470 matches. This coincides with DEFAULT_TRAITS.searchLimit, which
+      // is why it is spelled out — it is a measurement that happens to equal the default, not an
+      // unfilled field.
+      searchLimit: 20,
+      // chapterList 12: MEASURED at 4 requests for One Piece (1 detail page + 3 calls to
+      // /api/manga/<slug>/chapters at 500 chapters each, 1,376 chapters). 12 therefore covers
+      // ~5,500 chapters — far past the longest series in print — while still stopping a lying
+      // `has_more` from looping (the provider's own MAX_CHAPTER_API_CALLS caps it at 41 regardless).
+      // chapterPages 8: MEASURED at exactly 1 request; the reader page carries every image URL.
+      // search 40: MEASURED at 20 requests cold (sitemap.xml + sitemap0.xml + 10 comic shards, 1
+      // AniList POST, 4 MAL-Sync lookups, 2 slug confirmations, 1 top-hit summary) and 1 warm.
+      // The provider's own constants bound the worst case at 1 + MAX_SITEMAP_SHARDS(20) + 1 AniList
+      // + ALIAS_MAX_CANDIDATES(4) + ALIAS_PROBE_BUDGET(2) + BROWSE_LISTINGS(3) + 1 summary = 32, so
+      // 40 leaves margin — which matters because budgets cross-charge concurrent calls and an
+      // exhausted budget THROWS, i.e. costs the mapping rather than one request.
+      budgets: { chapterList: 12, chapterPages: 8, search: 40 },
+      pageUrlCache: {
+        ttlSeconds: 3600,
+        immutable: false,
+        note: 'img-r*/imgs-*.2xstorage.com paths are POSITIONAL (/<slug>/<chapter>/<index>.webp), not content-addressed, so a re-upload replaces the bytes at the same URL — never immutable. The URL itself was measured stable across three separate scrapes of the same chapter, and the CDN sends max-age=1200 with an Age of ~16 days and no ETag. The HOST is per series and NOT interchangeable (imgs-2 serves one-piece, img-r1 serves kimetsu-no-yaiba, and img-r2 404s on a path img-r1 serves), so page URLs must be read from the reader page and never constructed.',
+      },
+      // THE ONE TRAIT HERE THAT IS LOAD-BEARING RATHER THAN INFORMATIONAL, and the trailing slash
+      // is the whole of it. Re-measured 2026-08-14 against a live page image, five ways:
+      //   no Referer                                            -> 403, 4,573 bytes of CF HTML
+      //   'https://www.manganato.gg'        (no trailing slash)  -> 403, same 4,573 bytes
+      //   'https://www.manganato.gg/'                            -> 200, image/webp, 205,680 bytes,
+      //                                                             RIFF....WEBP magic
+      //   the real chapter URL (.../manga/kimetsu-no-yaiba/chapter-1) -> 403
+      //   'https://evil.example.com/'                            -> 403
+      // So this is NOT `baseUrl` (that is the no-slash form, which 403s) and NOT the page's own
+      // referrer. Get it wrong by one character and every page image 403s with an HTML body that a
+      // naive client will happily render as a broken image. The cover CDN behaves identically
+      // (403 bare, 200 with this exact string). The provider stamps the same value on each page's
+      // `headerForImage`, and getPages prefers that per-page value — but this trait is what
+      // /manga/image is handed for the proxy hop, so it has to be right here too.
+      imageHeaders: { Referer: 'https://www.manganato.gg/' },
+    },
+  },
 ];
+
+// ---------------------------------------------------------------------------------------------
+// WHY VYVYMANGA IS NOT ABOVE, THOUGH IT IS REPAIRED AND ITS PIPELINE DOES RUN
+//
+// The host swap to mangavyvy.net works: search -> fetchMangaInfo -> fetchChapterPages -> a real
+// 494,513-byte JPEG (ffd8ffe0/JFIF) from Blogspot, needing no Referer at all (verified bare, with
+// the site origin, and with a hostile origin — three byte-identical 200s). Manga id 55 returns
+// 1,298 One Piece chapters. So it is not broken, and it is not being excluded for being unverified.
+//
+// It is excluded because it answers the aggregator's ONLY question CONFIDENTLY WRONG. The
+// aggregator searches each provider with `meta.titles[0]` — AniList's primary title — and for
+// AniList manga 87216 that string is "Demon Slayer: Kimetsu no Yaiba". Measured live 2026-08-14:
+//
+//   search('Demon Slayer: Kimetsu no Yaiba') -> 1 result:  72754  "Kimetsu no Yaiba - Arena no
+//                                                          Dorena no Docchina no? (Doujinshi)"
+//   search('Demon Slayer Kimetsu no Yaiba')  -> the same single doujinshi (so it is not the colon)
+//   search('Demon Slayer')                   -> 10 results, 1373 "Kimetsu no Yaiba" FIRST
+//
+// Manga 1373 has 235 chapters; 72754 has ONE. Registered, VyvyManga would therefore map Demon
+// Slayer to a one-chapter doujinshi and serve it — as `matchConfidence: 'unverified'`, because no
+// id bridge names this provider, so it can never reach 'exact-id' and be sanity-checked either.
+// Confirmed end to end through this aggregator: `{provider:'Vyvymanga', providerId:'72754',
+// matchConfidence:'unverified'}`, 1 chapter, 29 pages of the wrong comic. That is the exact
+// silent-degradation shape this file exists to refuse: not an empty answer a caller would notice,
+// but a plausible one it would act on.
+//
+// A second, independent defect, same root: `search()` interpolates the query into the URL with
+// `.split(' ').join('+')` and NO percent-encoding. Measured: 'Tokyo #1' becomes `?q=tokyo+#1`, so
+// the `#` opens a URL FRAGMENT, the server sees `q=tokyo+`, and 36 unrelated results come back;
+// 'Fruits Basket & Co' splits into a bogus extra query parameter; 'a+b' silently becomes 'a b'.
+// Every one of those is a confidently wrong answer rather than an error.
+//
+// Both defects live in src/providers/manga/vyvymanga.ts, which this workstream does not own. When
+// they are fixed — search matching the AniList primary title, and `encodeURIComponent` on the query
+// — re-measure and register it. Until then, absent is the correct state, and this comment is here
+// so the next pass does not have to re-derive any of it.
+// ---------------------------------------------------------------------------------------------
 
 // =============================================================================================
 // RATE GATING + REQUEST BUDGET

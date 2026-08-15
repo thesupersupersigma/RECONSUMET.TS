@@ -379,21 +379,26 @@ describe('MangaAggregator getPages normalises what providers disagree about', ()
 
 describe('MangaAggregator provider registry', () => {
   test('registers exactly the providers that work today', async () => {
-    // Wave 2 added three, each re-verified end to end (search -> info -> chapters -> pages -> a
-    // real image GET with correct magic bytes) from the built dist/ before being registered.
-    // 'WeebCentral' is the class Mangasee123 pointed at its new host.
+    // Wave 2 added three and wave 3 added MangaKakalot, each re-verified end to end (search ->
+    // info -> chapters -> pages -> a real image GET with correct magic bytes) from the built dist/
+    // before being registered. 'WeebCentral' is the class Mangasee123 pointed at its new host.
     assert.deepEqual(
       defaultProviderRegistry().map(r => r.parser.name).sort(),
-      ['AsuraScans', 'FlameComics', 'MangaDex', 'MangaHere', 'MangaPill', 'WeebCentral'],
-      'brmangas/mangahost/mangareader/readmanga are deleted; vyvymanga/mangakakalot/comick are unrepaired or unverified'
+      ['AsuraScans', 'FlameComics', 'MangaDex', 'MangaHere', 'MangaKakalot', 'MangaPill', 'WeebCentral'],
+      'brmangas/mangahost/mangareader/readmanga are deleted; comick is out of scope; vyvymanga is ' +
+        'REPAIRED but deliberately unregistered — it answers the aggregator’s only query (AniList’s ' +
+        'primary title) with the wrong series, see the block comment after defaultProviderRegistry()'
     );
   });
 
   test('no registered provider claims a page-image Referer it does not need', async () => {
-    // MangaPill's CDN genuinely 403s without one. The three wave-2 CDNs were each fetched with the
-    // correct Referer, with none, and with a hostile one, and returned byte-identical 200s — so
-    // copying their providers' cosmetic headerForImage into traits would be a fabricated
-    // requirement. This pins the measurement, not the provider's own guess.
+    // MangaPill's CDN genuinely 403s without one, and so does MangaKakalot's (2xstorage.com —
+    // fussier still: only 'https://www.manganato.gg/' WITH the trailing slash works). The three
+    // wave-2 CDNs were each fetched with the correct Referer, with none, and with a hostile one,
+    // and returned byte-identical 200s — so copying their providers' cosmetic headerForImage into
+    // traits would be a fabricated requirement. This pins the measurement, not the provider's own
+    // guess. The loop below stays at the three wave-2 names on purpose: it asserts an ABSENCE, and
+    // the two providers that really need a Referer are pinned positively further down.
     const traits = Object.fromEntries(defaultProviderRegistry().map(r => [r.parser.name, r.traits]));
     for (const name of ['AsuraScans', 'FlameComics', 'WeebCentral'])
       assert.deepEqual(traits[name].imageHeaders, {}, `${name} needs no Referer — verified live`);
@@ -448,7 +453,7 @@ describe('MangaAggregator provider registry', () => {
     // Gating fetchChapterPages would gate ONE call that internally fires ~500. The gate is an
     // axios request interceptor on the provider's own client, so it catches the per-page storm.
     const described = new MangaAggregator().describeProviders();
-    assert.equal(described.length, 6);
+    assert.equal(described.length, 7);
     for (const d of described) assert.equal(d.rateGated, true, `${d.name} is not rate gated`);
     assert.deepEqual(described.find(d => d.name === 'MangaDex').langs, ['en']);
   });

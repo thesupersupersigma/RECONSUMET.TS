@@ -535,6 +535,24 @@ export const MANGA_CLASSIFIER_SIGNAL_COVERAGE: readonly {
       'Shounen) and carry no origin word. Its "Solo Leveling (Volume)" record shares the year with ' +
       'the base record, so the bracketed-qualifier veto is what separates them.',
   },
+  {
+    provider: 'MangaKakalot',
+    year: false,
+    type: false,
+    // Measured 2026-08-14 against the built dist, not read off the site: `search('One Piece', 1)`
+    // returned 19 rows whose ONLY keys are id/title/headerForImage/image/description/matchedVia
+    // (plus `approximateTitle` on inexact slug hits). No `releaseDate`, no `type` — on either the
+    // slug-index path or the browse-listing fallback, since both build the row from a sitemap slug
+    // and a detail-page <h1>.
+    note:
+      'search rows carry only id/title/image/description (+ matchedVia/approximateTitle), so NO ' +
+      'non-title field exists and tier 2 is unreachable — the same shape as MangaHere. Unlike ' +
+      "MangaPill this is NOT a dead end: MangaKakalot is absent from " +
+      'PROVIDERS_WITHOUT_MALSYNC_COVERAGE because MAL-Sync binds the MangaNato site, so the id ' +
+      "bridge carries it straight to 'exact-id' (verified: AniList manga 87216 -> " +
+      "kimetsu-no-yaiba, via 'malsync'). When MAL-Sync has no record it falls back to title " +
+      "matching and stays 'unverified'; there is no middle tier for it to land on.",
+  },
 ];
 
 /** Registry introspection for /manga diagnostics. Mirrors describeMangaMetadataLayer's role. */
