@@ -9,6 +9,7 @@ import {
   IMangaChapterPage,
   IMangaChapter,
 } from '../../models';
+import { MalSyncIndex, MangaAliasResolver } from '../meta/manga-xref';
 
 /**
  * MangaKakalot / MangaNato.
@@ -33,11 +34,41 @@ import {
  * A chapter id is therefore `<slug>/<chapter-slug>`. The old code smuggled a `$$READMANGANATO`
  * sentinel through the id field to pick a host; that magic string is gone along with its host.
  *
- * SEARCH IS DELIBERATELY BLOCKED. `/search/story/<q>` returns 403 to every non-browser client, and
- * `robots.txt` says so out loud — it disallows every `/search/story/` path. There is no header that fixes it and
- * we do not try. Instead `search()` runs against a slug index built from the site's own
- * `sitemap.xml`, which `robots.txt` explicitly advertises. See `search()` for what that can and
- * cannot answer — it is a slug index, not the site's search engine.
+ * SEARCH: THE SITE HAS A REAL SEARCH API, AND IT IS UNREACHABLE. Do not re-derive this — the full
+ * sweep was done on 2026-08-14 and every result is below.
+ *
+ * The site's own frontend does have a JSON search endpoint. `/` ships `<form name="frmsearch">`
+ * plus `/js/fsearch.js`, and that script issues:
+ *     GET /home/search/json?searchword=<change_alias(q)>      (jQuery $.ajax, dataType json)
+ * where `change_alias` lowercases and maps every space/punctuation run to `_`, i.e.
+ * `demon slayer` → `demon_slayer`. It is NOT covered by robots.txt, whose only Disallow rules are
+ * the `/search/story/` wildcard, `*?page=*`, `*?filter=*`, `/login` and `/register`.
+ *
+ * It is still unusable, and unlike `/search/story/` the reason is a MANAGED CHALLENGE, not a WAF
+ * block — both search paths answer `HTTP 403` with `cf-mitigated: challenge` and a
+ * `Just a moment...` interstitial. Probed, all 403:
+ *     GET  /home/search/json?searchword=demon_slayer          UA `Consumet/1.0`      → 403
+ *     GET  /home/search/json?searchword=demon_slayer          UA `Mozilla/5.0 …`     → 403
+ *     GET  /home/search/json?searchword=demon_slayer          + X-Requested-With     → 403
+ *     POST /home/search/json  (form body, ±X-Requested-With)                         → 403
+ *     GET  /home/search/json  (no query at all)                                      → 403
+ *     GET  /api/home/search/json?searchword=…                                        → 403
+ *     …and the same on www.natomanga.com, www.nelomanga.net, www.mangakakalot.gg.
+ * The rule is PATH-scoped, not client-scoped: on the very same connection and UA,
+ * `/manga/one-piece`, `/api/manga/one-piece/chapters` and `/manga-list/hot-manga` all answer 200.
+ * So the UA lever does not open it, no header does, and `/home/search`, `/advanced_search`,
+ * `/autocomplete`, `/suggest`, `/api/search` and `/search?q=` are all plain 404 — there is no
+ * unguarded sibling. Clearing a managed challenge needs a real browser, which is out of scope here.
+ *
+ * WHAT SEARCH THEREFORE DOES — two corpora, in this order:
+ *   1. A slug index built from the site's own `sitemap.xml` (robots explicitly advertises it):
+ *      ~94k slugs across 10 shards. This is the site's catalogue, but keyed by SLUG.
+ *   2. An ALIAS BRIDGE (AniList + MAL-Sync, via ../meta/manga-xref) that runs only when the query
+ *      is not already an exact slug. A slug encodes exactly ONE title, so the index alone cannot
+ *      answer `demon slayer` — and, worse than missing, it used to answer it CONFIDENTLY WRONG
+ *      with nine doujinshi/colour-re-release slugs. The bridge turns the query into
+ *      externally-attested identities and then confirms each one against this site.
+ * See `search()` for the guarantees and the residual limits.
  */
 
 /** How long a built slug index stays usable before it is rebuilt. */
@@ -53,6 +84,17 @@ const MAX_CHAPTER_API_CALLS = 40;
 /** Search results per page. */
 const RESULTS_PER_PAGE = 20;
 
+/** AniList alias candidates the bridge is allowed to turn into site slugs. */
+const ALIAS_MAX_CANDIDATES = 4;
+/**
+ * Direct `/manga/<slug>` confirmations the alias bridge may spend per search, for slugs the sitemap
+ * index does not list. Bounded on purpose: the index already answers the common case for free, and
+ * this exists only so a sitemap that is stale (or unreachable) cannot silently hide a real hit.
+ */
+const ALIAS_PROBE_BUDGET = 2;
+/** Alias titles slugified per candidate. Beyond this it is all non-Latin scripts that slugify away. */
+const ALIAS_MAX_TITLES = 12;
+
 /** Browse listings used as a last-resort search corpus when the sitemap index is unavailable. */
 const BROWSE_LISTINGS = ['/manga-list/latest-manga', '/manga-list/hot-manga', '/manga-list/new-manga'];
 
@@ -62,6 +104,58 @@ interface ChapterApiEntry {
   chapter_num?: number;
   updated_at?: string;
   view?: number;
+}
+
+/** How a search result was reached. Present on every result `search()` returns. */
+export type MangaKakalotMatchedVia =
+  /** the query slugified straight onto a slug in the sitemap index */
+  | 'slug-index'
+  /** MAL-Sync named this exact slug for the AniList series the query resolved to */
+  | 'alias-malsync'
+  /** an AniList title/synonym for the resolved series slugified onto a slug on this site */
+  | 'alias-anilist-title'
+  /** the sitemap was unavailable; the query was probed directly as `/manga/<slug>` */
+  | 'slug-probe'
+  /** the sitemap was unavailable; scraped off a browse listing */
+  | 'browse-listing';
+
+export interface IMangaKakalotResult extends IMangaResult {
+  /** true when `title` was de-slugified from the url instead of read off the site. */
+  approximateTitle?: boolean;
+  matchedVia?: MangaKakalotMatchedVia;
+}
+
+/**
+ * Why the answer looks the way it does.
+ *
+ * THIS FIELD IS THE POINT, not decoration. A search that quietly returns `[]` — or, as this
+ * provider used to for `demon slayer`, quietly returns nine confident wrong answers — is the
+ * silent-degradation shape this repo has been burned by. Every degraded or empty result set
+ * carries a populated `warning` here AND is logged, so "no results" can always be told apart from
+ * "the sitemap was down" and from "the alias bridge could not reach AniList".
+ */
+export interface IMangaKakalotSearchDiagnostics {
+  /** Corpora that actually contributed, in contribution order. */
+  strategy: MangaKakalotMatchedVia[];
+  /** Slugs in the sitemap index. 0 means the index could not be built at all. */
+  indexedSlugs: number;
+  /** Whether the AniList/MAL-Sync alias bridge was consulted for this query. */
+  aliasBridgeRan: boolean;
+  /** Alias identities AniList attested for the query (before confirming them against this site). */
+  aliasCandidates: number;
+  /** Set whenever the answer is empty or degraded. Names the cause in words. */
+  warning?: string;
+}
+
+export interface IMangaKakalotSearch extends ISearch<IMangaResult> {
+  results: IMangaKakalotResult[];
+  diagnostics: IMangaKakalotSearchDiagnostics;
+}
+
+/** One alias identity that has been confirmed to exist on this site. */
+interface AliasHit {
+  slug: string;
+  via: 'alias-malsync' | 'alias-anilist-title';
 }
 
 class MangaKakalot extends MangaParser {
@@ -93,10 +187,39 @@ class MangaKakalot extends MangaParser {
   /** De-duplicates concurrent cold searches so they share one index build instead of N. */
   private searchIndexInFlight?: Promise<string[]>;
 
-  /** Drops the cached slug index. Mostly useful for long-lived processes and for tests. */
+  /**
+   * Set false to switch the AniList/MAL-Sync alias bridge off entirely — no off-site request is
+   * then made on any code path, and search is the slug index alone (with its documented blind spot).
+   */
+  useAliasResolution = true;
+
+  private aliasResolverInstance?: MangaAliasResolver;
+
+  /**
+   * The alias bridge, built lazily from THIS PROVIDER'S OWN axios client.
+   *
+   * Using `this.client` is deliberate and load-bearing: it means one `setAxiosAdapter()` covers the
+   * AniList and MAL-Sync calls as well as the manganato ones, so the bridge is exercisable offline
+   * by the same fake adapter as the rest of the provider, and any proxy configured on the provider
+   * applies to it too.
+   */
+  private get aliasResolver(): MangaAliasResolver | undefined {
+    if (!this.useAliasResolution) return undefined;
+    if (!this.aliasResolverInstance)
+      this.aliasResolverInstance = new MangaAliasResolver(this.client, new MalSyncIndex(this.client));
+    return this.aliasResolverInstance;
+  }
+
+  /** Inject a pre-built alias resolver (tests, or a shared instance across providers). */
+  setAliasResolver = (resolver: MangaAliasResolver): void => {
+    this.aliasResolverInstance = resolver;
+  };
+
+  /** Drops the cached slug index and any cached alias lookups. For long-lived processes and tests. */
   clearSearchIndex = (): void => {
     this.searchIndex = undefined;
     this.searchIndexInFlight = undefined;
+    this.aliasResolverInstance?.clearCache();
   };
 
   // ---------------------------------------------------------------------------------------------
@@ -281,79 +404,246 @@ class MangaKakalot extends MangaParser {
   /**
    * Search.
    *
-   * WHAT THIS IS. The site's own search (`/search/story/<q>`) is 403 to every non-browser client and
-   * `robots.txt` disallows it outright, so this does not use it. It instead matches the query
-   * against a slug index built from `sitemap.xml` (~94k manga across 10 shards, ~2.4MB gzipped,
-   * cached for {@link SEARCH_INDEX_TTL_MS}).
+   * WHAT THIS IS. The site's own search API exists but is behind a Cloudflare managed challenge on
+   * every path and every client (the full probe log is in the file header — do not re-derive it).
+   * So this answers from two corpora instead:
    *
-   * WHAT IT ANSWERS WELL. Anything whose title matches the slug the site chose: `one piece`,
-   * `solo leveling`, `chainsaw man`, `jujutsu kaisen` all resolve exactly, and partial words like
-   * `kaguya` return every slug containing them, most-recently-updated first.
+   *   1. **The sitemap slug index** — ~94k slugs across 10 shards, cached for
+   *      {@link SEARCH_INDEX_TTL_MS}. This is the site's real catalogue, keyed by slug.
+   *   2. **The alias bridge** ({@link MangaAliasResolver}) — AniList synonyms plus MAL-Sync's exact
+   *      MangaNato identifier. Consulted ONLY when the query is not already an exact slug, so the
+   *      common case still costs zero off-site requests.
    *
-   * WHAT IT CANNOT ANSWER — this is not the site's search engine and should not be sold as one:
-   *   - **Alternative titles.** A slug encodes ONE title. `kimetsu no yaiba` hits; `demon slayer`
-   *     does not. `attack on titan` hits; `shingeki no kyojin` does not. Which variant the site
-   *     slugged is not predictable.
-   *   - **Typos and fuzziness.** Matching is substring/token containment. There is no edit distance.
-   *   - **Anything not in the title.** No author, genre or description search.
-   *   - **Exact display titles.** Results carry a title de-slugified from the url, so punctuation and
-   *     capitalisation are approximations and are flagged with `approximateTitle: true`. The only
-   *     exception is an exact-slug top hit on page 1, which is enriched from its real detail page.
+   * WHY (2) IS NOT A NICETY. A slug encodes exactly ONE title, and the index alone does not fail
+   * quietly — it fails *confidently*. Measured live on 2026-08-14, `demon slayer` returned nine
+   * results, all doujinshi or colour re-releases, with the actual series nowhere in them. With the
+   * bridge, `demon slayer` resolves through AniList 87216 / MAL 96792 to MAL-Sync's MangaNato
+   * identifier `kimetsu-no-yaiba`, which is then confirmed to exist in this site's own sitemap
+   * before it is returned. `shingeki no kyojin` → `attack-on-titan` resolves the same way.
+   *
+   * AN ALIAS IS ATTESTED, THEN CONFIRMED. AniList and MAL-Sync can only assert that a series exists
+   * and what it is called; neither knows this site's stock. Every alias slug is therefore checked
+   * against the sitemap index (free) or, for at most {@link ALIAS_PROBE_BUDGET} slugs the index does
+   * not list, by fetching `/manga/<slug>` and requiring a 200. Nothing unconfirmed is ever returned.
+   *
+   * WHAT IT STILL CANNOT ANSWER, stated plainly:
+   *   - **Series AniList does not carry.** The bridge is only as broad as AniList's manga catalogue.
+   *   - **Typos.** Slug matching is substring/token containment with no edit distance; the alias
+   *     bridge inherits AniList's tolerance and nothing more.
+   *   - **Author, genre or description queries.** Titles only.
+   *   - **Exact display titles.** A result flagged `approximateTitle: true` had its title
+   *     de-slugified from the url. The top hit on page 1 is enriched from its real detail page.
+   *
+   * Every return carries {@link IMangaKakalotSearchDiagnostics}; an empty or degraded answer always
+   * populates `diagnostics.warning` and logs it.
    *
    * @param query search terms
    * @param page 1-based page of results
    */
-  override search = async (query: string, page: number = 1): Promise<ISearch<IMangaResult>> => {
+  override search = async (query: string, page: number = 1): Promise<IMangaKakalotSearch> => {
     const normalizedQuery = this.slugify(query);
     const currentPage = Number.isFinite(page) && page > 0 ? Math.floor(page) : 1;
 
-    if (!normalizedQuery) return { currentPage, hasNextPage: false, totalPages: 0, totalResults: 0, results: [] };
+    if (!normalizedQuery)
+      return this.emptySearch(currentPage, {
+        strategy: [],
+        indexedSlugs: 0,
+        aliasBridgeRan: false,
+        aliasCandidates: 0,
+        warning: `MangaKakalot: the query ${JSON.stringify(query)} has no searchable characters.`,
+      });
 
-    let ranked: string[] = [];
+    let index: string[] = [];
+    let indexFailed = false;
     try {
-      ranked = this.rankSlugs(await this.getSearchIndex(), normalizedQuery);
+      index = await this.getSearchIndex();
     } catch {
-      // index unavailable — handled by the browse fallback below
+      indexFailed = true;
+    }
+    if (!index.length) indexFailed = true;
+
+    const ranked = index.length ? this.rankSlugs(index, normalizedQuery) : [];
+    const exactSlugHit = ranked[0] === normalizedQuery;
+
+    // The bridge is skipped when the query IS a slug on this site — that answer is already exact,
+    // and AniList could only agree with it at the cost of two off-site requests.
+    let alias: { hits: AliasHit[]; ran: boolean; candidates: number } = { hits: [], ran: false, candidates: 0 };
+    if (!exactSlugHit) alias = await this.aliasHits(query, index);
+
+    const via = new Map<string, MangaKakalotMatchedVia>();
+    const ordered: string[] = [];
+    for (const hit of alias.hits) {
+      if (via.has(hit.slug)) continue;
+      via.set(hit.slug, hit.via);
+      ordered.push(hit.slug);
+    }
+    for (const slug of ranked) {
+      if (via.has(slug)) continue;
+      via.set(slug, 'slug-index');
+      ordered.push(slug);
     }
 
-    if (!ranked.length) return this.browseFallback(normalizedQuery, currentPage);
+    const diagnostics: IMangaKakalotSearchDiagnostics = {
+      strategy: [...new Set(ordered.map(slug => via.get(slug)!))],
+      indexedSlugs: index.length,
+      aliasBridgeRan: alias.ran,
+      aliasCandidates: alias.candidates,
+    };
+
+    if (!ordered.length) return this.browseFallback(query, normalizedQuery, currentPage, diagnostics, indexFailed);
+
+    // Degraded-but-non-empty answers are the DANGEROUS ones — they look fine. Say so out loud.
+    //
+    // The condition is "the query was not an exact slug and nothing was confirmed for it", NOT "the
+    // bridge ran and failed". Those differ exactly when the bridge is switched off, which is the
+    // case that silently returns the confident-but-wrong slug list this provider is guarded against.
+    if (indexFailed)
+      diagnostics.warning =
+        `MangaKakalot: the sitemap slug index was unavailable, so these results come only from the ` +
+        `alias bridge. Recall is a small fraction of the catalogue.`;
+    else if (!exactSlugHit && !alias.hits.length)
+      diagnostics.warning =
+        `MangaKakalot: ${JSON.stringify(query)} is not a slug on this site and no alternative title ` +
+        `was confirmed for it` +
+        (!alias.ran
+          ? ` (the alias bridge is DISABLED — useAliasResolution is false — so no synonym was tried).`
+          : alias.candidates
+            ? ` (the alias bridge ran; AniList attested ${alias.candidates} candidate series, none of ` +
+              `which this site stocks under a title we could confirm).`
+            : ` (the alias bridge ran; AniList attested no series for this query).`) +
+        ` These results are slug-substring matches only, so the series you meant may be absent, or ` +
+        `may be listed here under a different romanisation.`;
+    if (diagnostics.warning) console.warn(`[mangakakalot] ${diagnostics.warning}`);
 
     const start = (currentPage - 1) * RESULTS_PER_PAGE;
-    const slice = ranked.slice(start, start + RESULTS_PER_PAGE);
+    const slice = ordered.slice(start, start + RESULTS_PER_PAGE);
 
-    const results: IMangaResult[] = slice.map(slug => ({
+    const results: IMangaKakalotResult[] = slice.map(slug => ({
       id: slug,
       title: this.deslugify(slug),
       // The title came from the url, not from the page. Consumers that care can re-fetch.
       approximateTitle: true,
+      matchedVia: via.get(slug),
       headerForImage: { Referer: this.imageReferer },
     }));
 
-    // An exact slug hit is the overwhelmingly common query shape, and one extra request buys it a
-    // real title, cover and description instead of a de-slugified guess. Strictly best-effort.
-    if (currentPage === 1 && results.length && slice[0] === normalizedQuery) {
-      try {
-        const info = await this.fetchMangaInfo(slice[0]);
-        results[0] = {
-          id: info.id,
-          title: info.title,
-          image: info.image,
-          description: info.description,
-          status: info.status,
-          headerForImage: { Referer: this.imageReferer },
-        };
-      } catch {
-        // keep the de-slugified result
-      }
+    // The top hit is what a caller acts on, and one cheap request buys it a real title, cover and
+    // description instead of a de-slugified guess. Strictly best-effort. Deliberately NOT
+    // `fetchMangaInfo` — that would drag the entire paginated chapter list in on every search.
+    if (currentPage === 1 && results.length) {
+      const summary = await this.fetchSummary(slice[0]);
+      if (summary) results[0] = { ...summary, matchedVia: via.get(slice[0]) };
     }
 
     return {
       currentPage,
-      hasNextPage: start + RESULTS_PER_PAGE < ranked.length,
-      totalPages: Math.ceil(ranked.length / RESULTS_PER_PAGE),
-      totalResults: ranked.length,
+      hasNextPage: start + RESULTS_PER_PAGE < ordered.length,
+      totalPages: Math.ceil(ordered.length / RESULTS_PER_PAGE),
+      totalResults: ordered.length,
       results,
+      diagnostics,
     };
+  };
+
+  /**
+   * Turn the raw query into slugs on THIS site, via AniList synonyms and MAL-Sync's exact
+   * identifier. Never throws: the bridge failing must degrade search, not break it.
+   */
+  private aliasHits = async (
+    query: string,
+    index: string[]
+  ): Promise<{ hits: AliasHit[]; ran: boolean; candidates: number }> => {
+    const resolver = this.aliasResolver;
+    if (!resolver) return { hits: [], ran: false, candidates: 0 };
+
+    let candidates;
+    try {
+      candidates = await resolver.resolve(query);
+    } catch (err) {
+      // MangaAliasResolver swallows its own faults; this is belt-and-braces so the bridge can never
+      // be the reason a search throws.
+      console.error(
+        `[mangakakalot] the alias bridge threw for ${JSON.stringify(query)} (search continues on the ` +
+          `slug index alone): ${(err as Error).message}`
+      );
+      return { hits: [], ran: true, candidates: 0 };
+    }
+
+    const indexed = new Set(index);
+    const hits: AliasHit[] = [];
+    const seen = new Set<string>();
+    let probesLeft = ALIAS_PROBE_BUDGET;
+
+    for (const candidate of candidates.slice(0, ALIAS_MAX_CANDIDATES)) {
+      // Proposals, strongest first: MAL-Sync names this site's identifier outright, with no string
+      // comparison in the path at all. Slugified AniList titles are the fallback for the series
+      // MAL-Sync has no MangaNato entry for.
+      const proposals: AliasHit[] = [];
+      const push = (slug: string, via: AliasHit['via']) => {
+        if (slug && !proposals.some(p => p.slug === slug)) proposals.push({ slug, via });
+      };
+
+      const malSyncId = await resolver.providerIdFor(candidate, this.name);
+      if (malSyncId) push(this.idPath(malSyncId)[0] ?? '', 'alias-malsync');
+      for (const title of candidate.titles.slice(0, ALIAS_MAX_TITLES))
+        push(this.slugify(title), 'alias-anilist-title');
+
+      let chosen = proposals.find(p => indexed.has(p.slug));
+      // Nothing in the index. The sitemap can be stale or (when it failed to build) empty, so spend
+      // a bounded number of direct confirmations rather than dropping an attested identity.
+      if (!chosen && probesLeft > 0 && proposals.length) {
+        probesLeft--;
+        if (await this.slugExists(proposals[0].slug)) chosen = proposals[0];
+      }
+
+      if (!chosen || seen.has(chosen.slug)) continue;
+      seen.add(chosen.slug);
+      hits.push(chosen);
+    }
+
+    return { hits, ran: true, candidates: candidates.length };
+  };
+
+  /** Does `/manga/<slug>` exist? A missing slug answers 404 on this host — verified live. */
+  private slugExists = async (slug: string): Promise<boolean> => {
+    if (!slug) return false;
+    try {
+      const res = await this.client.get(`${this.baseUrl}/manga/${slug}`, { validateStatus: () => true });
+      return res.status === 200;
+    } catch {
+      return false;
+    }
+  };
+
+  /**
+   * The detail page reduced to what a search result needs — title, cover, description — WITHOUT the
+   * paginated chapter API that `fetchMangaInfo` walks. Returns null for anything but a real page.
+   */
+  private fetchSummary = async (slug: string): Promise<IMangaKakalotResult | null> => {
+    try {
+      const res = await this.client.get(`${this.baseUrl}/manga/${slug}`, { validateStatus: () => true });
+      if (res.status !== 200) return null;
+      const $ = load(res.data);
+      const title = $('ul.manga-info-text > li:first-child h1').first().text().trim();
+      if (!title) return null;
+
+      const result: IMangaKakalotResult = { id: slug, title, headerForImage: { Referer: this.imageReferer } };
+      const image = $('div.manga-info-pic img').first().attr('src');
+      if (image) result.image = this.absolute(image);
+      const description = this.parseDescription($);
+      if (description) result.description = description;
+      return result;
+    } catch {
+      return null;
+    }
+  };
+
+  private emptySearch = (
+    currentPage: number,
+    diagnostics: IMangaKakalotSearchDiagnostics
+  ): IMangaKakalotSearch => {
+    if (diagnostics.warning) console.warn(`[mangakakalot] ${diagnostics.warning}`);
+    return { currentPage, hasNextPage: false, totalPages: 0, totalResults: 0, results: [], diagnostics };
   };
 
   /** Returns the cached slug index, building it if missing or stale. */
@@ -445,35 +735,26 @@ class MangaKakalot extends MangaParser {
   };
 
   /**
-   * Last resort when the sitemap is unreachable or empty: probe the query as a literal slug, then
-   * scan the front page of the browse listings. Recall is tiny — roughly the ~60 most recently
-   * updated/most popular titles plus any exact-slug hit — but it keeps search returning something
-   * useful instead of throwing. Only page 1 of each listing is fetched; `robots.txt` disallows
-   * `*?page=*`, so this does not paginate them.
+   * Last resort when neither the sitemap index nor the alias bridge produced a slug: probe the
+   * query as a literal slug, then scan the front page of the browse listings. Recall is tiny —
+   * roughly the ~60 most recently updated/most popular titles plus any exact-slug hit — but it
+   * keeps search returning something useful instead of throwing. Only page 1 of each listing is
+   * fetched; `robots.txt` disallows `*?page=*`, so this does not paginate them.
    */
-  private browseFallback = async (query: string, currentPage: number): Promise<ISearch<IMangaResult>> => {
-    const results: IMangaResult[] = [];
+  private browseFallback = async (
+    rawQuery: string,
+    query: string,
+    currentPage: number,
+    diagnostics: IMangaKakalotSearchDiagnostics,
+    indexFailed: boolean
+  ): Promise<IMangaKakalotSearch> => {
+    const results: IMangaKakalotResult[] = [];
     const seen = new Set<string>();
 
-    try {
-      const res = await this.client.get(`${this.baseUrl}/manga/${query}`, {
-        validateStatus: () => true,
-      });
-      if (res.status === 200) {
-        const $ = load(res.data);
-        const title = $('ul.manga-info-text > li:first-child h1').first().text().trim();
-        if (title) {
-          seen.add(query);
-          results.push({
-            id: query,
-            title,
-            image: this.absolute($('div.manga-info-pic img').first().attr('src') ?? ''),
-            headerForImage: { Referer: this.imageReferer },
-          });
-        }
-      }
-    } catch {
-      // ignore — the listing scan below may still find something
+    const direct = await this.fetchSummary(query);
+    if (direct) {
+      seen.add(query);
+      results.push({ ...direct, matchedVia: 'slug-probe' });
     }
 
     const tokens = query.split('-').filter(Boolean);
@@ -496,6 +777,7 @@ class MangaKakalot extends MangaParser {
             id: slug,
             title,
             image: this.absolute(img.attr('data-src') || img.attr('src') || ''),
+            matchedVia: 'browse-listing',
             headerForImage: { Referer: this.imageReferer },
           });
         });
@@ -504,6 +786,24 @@ class MangaKakalot extends MangaParser {
       }
     }
 
+    diagnostics.strategy = [...new Set(results.map(r => r.matchedVia!))];
+    // Both branches below are the silent-failure shapes this provider is guarded against. Neither
+    // may be reported as a plain empty array.
+    diagnostics.warning = results.length
+      ? `MangaKakalot: neither the sitemap slug index nor the alias bridge produced a hit for ` +
+        `${JSON.stringify(rawQuery)}; these results are scraped from the front page of the browse ` +
+        `listings, which is roughly the 60 most recent/popular titles, not the catalogue.`
+      : `MangaKakalot: NO results for ${JSON.stringify(rawQuery)}. ` +
+        (indexFailed
+          ? `The sitemap slug index could not be built (0 slugs), so the catalogue was never searched — ` +
+            `this is an upstream failure, not evidence the series is absent. `
+          : `The sitemap slug index (${diagnostics.indexedSlugs} slugs) held no match. `) +
+        (diagnostics.aliasBridgeRan
+          ? `The alias bridge ran and AniList attested ${diagnostics.aliasCandidates} candidate series, ` +
+            `none confirmable on this site.`
+          : `The alias bridge did NOT run (useAliasResolution is off), so no alternative title was tried.`);
+    console.warn(`[mangakakalot] ${diagnostics.warning}`);
+
     const start = (currentPage - 1) * RESULTS_PER_PAGE;
     return {
       currentPage,
@@ -511,6 +811,7 @@ class MangaKakalot extends MangaParser {
       totalPages: Math.ceil(results.length / RESULTS_PER_PAGE) || 0,
       totalResults: results.length,
       results: results.slice(start, start + RESULTS_PER_PAGE),
+      diagnostics,
     };
   };
 

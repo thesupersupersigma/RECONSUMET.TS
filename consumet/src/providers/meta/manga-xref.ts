@@ -1,7 +1,7 @@
 import { AxiosInstance } from 'axios';
 
 import { compareTwoStrings } from '../../utils/utils';
-import { safeErrorString } from '../../utils/cf-solver';
+import { graphqlErrorsSummary, safeErrorString } from '../../utils/cf-solver';
 import type { IMangaMeta } from './manga-aggregator';
 
 // ---------------------------------------------------------------------------------------------
@@ -644,6 +644,286 @@ export class MangaDexXref {
       if (record && String(record.links.al ?? '').trim() === anilistId) return record;
     }
     return null;
+  };
+
+  clearCache = (): void => this.cache.clear();
+
+  stats = () => ({ hits: this.cache.hits, misses: this.cache.misses });
+}
+
+// =============================================================================================
+// ALIAS RESOLUTION — free text in, PROVIDER IDS out.
+//
+// WHY THIS EXISTS. Everything above answers "given an AniList id, which record is this on provider
+// X?". That is the aggregator's question. It is NOT the question a provider whose own search is
+// unusable has to answer, which is the inverse: "given the words a human typed, which id on MY site
+// is that?".
+//
+// THE CONCRETE FAILURE. MangaKakalot/MangaNato's search endpoints are both behind a Cloudflare
+// managed challenge (see src/providers/manga/mangakakalot.ts for the full probe log), so that
+// provider ranks queries against a slug index built from the sitemap. A slug encodes exactly ONE
+// title, so `demon slayer` cannot reach `kimetsu-no-yaiba`. Measured on the live index (93,735
+// slugs, 2026-08-14) the old behaviour was worse than a miss — `demon slayer` returned NINE
+// confident results, every one of them a doujinshi or a colour re-release, and the real series was
+// absent:
+//
+//   demon-slayer-tanjiro-kanao-doujinshi, demon-slayer-s-quest,
+//   demon-slayer-kimetsu-no-yaiba-colored, demon-slayer-kimetsu-academy, …
+//
+// AniList already knows `Kimetsu no Yaiba` is `Demon Slayer: Kimetsu no Yaiba`, and MAL-Sync
+// already names the exact MangaNato slug for its MAL id. Both bridges are committed machinery
+// sitting in this file. This class points them at the query string instead of at an id.
+//
+// THIS IS A CROSS-REFERENCE, NOT A SEARCH ENGINE. It cannot find a series AniList does not carry,
+// and it does not rank the site's catalogue. It converts one query into a small set of
+// *externally-attested* identities, each of which the caller must still confirm exists on its own
+// site. Attestation without confirmation would be a new way to return confident nonsense, which is
+// the exact failure it is here to remove.
+// =============================================================================================
+
+const ANILIST_API = 'https://graphql.anilist.co';
+
+/** AniList candidates pulled per query. Beyond ~8 the tail is unrelated series. */
+const ALIAS_CANDIDATES = 8;
+
+/**
+ * Minimum query↔title similarity for a candidate to be believed.
+ *
+ * Calibrated against the live probe, not guessed. For `solo leveling` the third AniList hit is
+ * "The Privilege of the Second Life is Power Leveling" at 0.647, which is a coincidental bigram
+ * overlap and must not become a search result; the two real hits score 1.000. 0.7 sits in that gap.
+ */
+const ALIAS_MIN_SIMILARITY = 0.7;
+
+/** One resolved external identity for a free-text query. */
+export interface IMangaAliasCandidate {
+  anilistId: number;
+  malId?: number;
+  /** AniList `popularity`. Kept because it is the tiebreaker — see {@link MangaAliasResolver.resolve}. */
+  popularity: number;
+  /** romaji, english, native, then every synonym — deduplicated, AniList order preserved. */
+  titles: string[];
+  /** 0..1 similarity of the query to this candidate's best-matching title. */
+  similarity: number;
+}
+
+/**
+ * Query/title normalisation for comparison only. Deliberately lossy: punctuation and case carry no
+ * signal across romanisations, and `compareTwoStrings` already strips whitespace itself.
+ */
+const normalizeTitle = (value: string): string =>
+  value
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+
+/**
+ * The forms of a title worth comparing against.
+ *
+ * THE SUBTITLE SPLIT IS THE WHOLE TRICK, and it is not cosmetic. English manga titles are
+ * overwhelmingly `<localised name>: <original romaji>` — "Demon Slayer: Kimetsu no Yaiba",
+ * "Attack on Titan: No Regrets". Comparing `demon slayer` against the FULL string scores it BELOW
+ * "Demon Slayer Mother" (an unrelated series, and AniList's own top hit for that query), because
+ * the trailing romaji dilutes the bigram overlap. Comparing against the part before the colon
+ * scores an exact 1.000 and puts the right series first. Verified live for `demon slayer`,
+ * `shingeki no kyojin`, `attack on titan`, `solo leveling` and `kimetsu no yaiba`.
+ */
+const titleVariants = (title: string): string[] => {
+  const variants = [title];
+  const head = title.split(/[:–—]/)[0];
+  if (head && head.trim() !== title.trim()) variants.push(head);
+  return variants;
+};
+
+/** Best similarity of `query` against any variant of any of `titles`. */
+export const scoreAliasTitles = (query: string, titles: readonly string[]): number => {
+  const wanted = normalizeTitle(query);
+  if (!wanted) return 0;
+  let best = 0;
+  for (const title of titles)
+    for (const variant of titleVariants(title)) {
+      const candidate = normalizeTitle(variant);
+      if (!candidate) continue;
+      const score = candidate === wanted ? 1 : compareTwoStrings(wanted, candidate);
+      if (score > best) best = score;
+    }
+  return best;
+};
+
+interface AniListAliasMedia {
+  id?: number;
+  idMal?: number | null;
+  popularity?: number | null;
+  title?: { romaji?: string | null; english?: string | null; native?: string | null } | null;
+  synonyms?: (string | null)[] | null;
+}
+
+const ALIAS_QUERY = `query ($search: String, $perPage: Int) {
+  Page(perPage: $perPage) {
+    media(search: $search, type: MANGA, sort: SEARCH_MATCH) {
+      id
+      idMal
+      popularity
+      title { romaji english native }
+      synonyms
+    }
+  }
+}`;
+
+/**
+ * Free-text query → externally-attested series identities → exact provider ids.
+ *
+ * Two independent outputs, and a caller should use both:
+ *   * {@link resolve} returns AniList candidates carrying every title and synonym AniList knows.
+ *     Slugifying those titles is enough on its own to cross a romanisation gap, and it needs no
+ *     MAL-Sync coverage at all.
+ *   * {@link providerIdFor} additionally asks MAL-Sync for the provider's OWN identifier for that
+ *     series. This is the strong path — a hard id with no string matching anywhere in it. Verified
+ *     live 2026-08-14: `demon slayer` → AniList 87216 (idMal 96792) → MAL-Sync `Sites.MangaNato` →
+ *     the single entry `kimetsu-no-yaiba`, carrying `aniId: 87216` in agreement.
+ *
+ * Never throws. An upstream fault is logged and degrades to "no aliases", which leaves the caller
+ * exactly where it was before this class existed.
+ */
+export class MangaAliasResolver {
+  private readonly cache = new TtlCache<string, IMangaAliasCandidate[]>(v =>
+    v.length ? TTL_HIT_MS : TTL_MISS_MS
+  );
+
+  constructor(
+    private readonly client: AxiosInstance,
+    /** Optional. Without it {@link providerIdFor} always returns null and only titles are offered. */
+    private readonly malsync?: MalSyncIndex,
+    private readonly anilistUrl: string = ANILIST_API
+  ) {}
+
+  /**
+   * Candidates for `query`, best first.
+   *
+   * ORDERING, and the honest account of it: the primary key is title similarity and the tiebreak is
+   * AniList `popularity`. The tiebreak is load-bearing rather than decorative, because the subtitle
+   * split above drives whole families of spin-offs to an identical 1.000 — for `demon slayer` the
+   * main series, "Kimetsu Academy", "The Flower of Happiness" and "One-Winged Butterfly" all score
+   * exactly 1.000 and ONLY popularity separates them (208,719 vs 2,667 / 2,448 / 2,026).
+   *
+   * That makes this a popularity prior, and priors can be wrong: someone who genuinely wants an
+   * obscure spin-off whose localised name is a prefix of a famous one gets the famous one first. It
+   * is still the right default — the spin-offs stay in the list, just below — but it is a ranking
+   * heuristic and must not be read as an identification.
+   */
+  resolve = async (query: string): Promise<IMangaAliasCandidate[]> => {
+    const key = normalizeTitle(query);
+    if (!key) return [];
+    return this.cache.get(key, async () => {
+      let payload: any;
+      try {
+        const { data, status } = await this.client.post(
+          this.anilistUrl,
+          { query: ALIAS_QUERY, variables: { search: query, perPage: ALIAS_CANDIDATES } },
+          {
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            validateStatus: () => true,
+          }
+        );
+        if (status !== 200) {
+          console.warn(
+            `[manga-xref] AniList alias search for "${query}" answered HTTP ${status} — no aliases for ` +
+              `this query (upstream fault, NOT "the series does not exist")`
+          );
+          return [];
+        }
+        payload = data;
+      } catch (err) {
+        console.error(
+          `[manga-xref] AniList alias search for "${query}" FAILED (no aliases; the caller's own ` +
+            `matching still runs): ${safeErrorString(err)}`
+        );
+        return [];
+      }
+
+      // AniList signals rate limiting as HTTP 200 with a populated errors[] and null data. Reading
+      // that as "no such series" is precisely the silent degradation this layer exists to stop.
+      const errors = graphqlErrorsSummary(payload);
+      if (errors) {
+        console.error(
+          `[manga-xref] AniList alias search for "${query}" returned HTTP 200 WITH errors — treating as ` +
+            `an upstream fault, NOT as "no matches": ${errors}`
+        );
+        return [];
+      }
+
+      const media: AniListAliasMedia[] = payload?.data?.Page?.media ?? [];
+      if (!Array.isArray(media)) return [];
+
+      const candidates: IMangaAliasCandidate[] = [];
+      for (const entry of media) {
+        const anilistId = Number(entry?.id);
+        if (!Number.isFinite(anilistId) || anilistId <= 0) continue;
+
+        const titles: string[] = [];
+        const seen = new Set<string>();
+        const synonyms = Array.isArray(entry?.synonyms) ? entry.synonyms : [];
+        for (const raw of [entry?.title?.romaji, entry?.title?.english, entry?.title?.native, ...synonyms]) {
+          const title = asTrimmed(raw);
+          if (!title) continue;
+          const dedupe = title.toLowerCase();
+          if (seen.has(dedupe)) continue;
+          seen.add(dedupe);
+          titles.push(title);
+        }
+        if (!titles.length) continue;
+
+        const similarity = scoreAliasTitles(query, titles);
+        if (similarity < ALIAS_MIN_SIMILARITY) continue;
+
+        const malId = Number(entry?.idMal);
+        const popularity = Number(entry?.popularity);
+        candidates.push({
+          anilistId,
+          ...(Number.isFinite(malId) && malId > 0 ? { malId } : {}),
+          popularity: Number.isFinite(popularity) ? popularity : 0,
+          titles,
+          similarity,
+        });
+      }
+
+      return candidates.sort((a, b) => b.similarity - a.similarity || b.popularity - a.popularity);
+    });
+  };
+
+  /**
+   * The provider's own identifier for `candidate`, via MAL-Sync, or null.
+   *
+   * Costs nothing for a provider MAL-Sync does not cover, or for a candidate AniList gave no MAL id
+   * for — both return null before any request, the same invariant the id bridges above keep.
+   */
+  providerIdFor = async (candidate: IMangaAliasCandidate, providerName: string): Promise<string | null> => {
+    if (!this.malsync || !candidate?.malId) return null;
+    const binding = MALSYNC_SITE_BINDINGS.find(b => b.provider.toLowerCase() === providerName.toLowerCase());
+    if (!binding) return null;
+
+    try {
+      const payload = await this.malsync.lookup(candidate.malId);
+      const entries = this.malsync.entriesForSite(payload, binding.site);
+      if (!entries.length) return null;
+      // pickSiteEntry drops entries whose `aniId` disagrees with the AniList id — a free hard check
+      // that the MAL id we followed really does lead back to the series AniList named.
+      const meta: IMangaMeta = {
+        anilistId: String(candidate.anilistId),
+        titles: candidate.titles,
+        ...(candidate.malId ? { malId: candidate.malId } : {}),
+      };
+      const entry = pickSiteEntry(entries, meta, binding.site);
+      return entry ? binding.toProviderId(entry) : null;
+    } catch (err) {
+      console.error(
+        `[manga-xref] MAL-Sync alias bridge for AniList manga id ${candidate.anilistId} → ${providerName} ` +
+          `FAILED (falling back to slugified titles): ${safeErrorString(err)}`
+      );
+      return null;
+    }
   };
 
   clearCache = (): void => this.cache.clear();

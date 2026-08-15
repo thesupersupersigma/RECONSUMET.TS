@@ -23,52 +23,99 @@ const mangakakalot = new MANGA.MangaKakalot();
 
 | Parameter | Type     | Description                                                                  |
 | --------- | -------- | ---------------------------------------------------------------------------- |
-| query     | `string` | query to search for. (*In this case, We're searching for `Solo Leveling`*) |
+| query     | `string` | query to search for. (*In this case, We're searching for `Demon Slayer`*) |
 | page      | `number` | *(optional)* 1-based page of results, 20 per page. Defaults to `1`. |
 
 ```ts
-mangakakalot.search("Solo Leveling").then(data => {
+mangakakalot.search("Demon Slayer").then(data => {
   console.log(data);
 })
 ```
-returns a promise which resolves into an array of manga. (*[`Promise<ISearch<IMangaResult[]>>`](https://github.com/consumet/extensions/blob/master/src/models/types.ts#L97-L106)*)\
+returns a promise which resolves into an array of manga plus a `diagnostics` block. (*[`Promise<ISearch<IMangaResult[]>>`](https://github.com/consumet/extensions/blob/master/src/models/types.ts#L97-L106)*)\
 output:
 ```js
 {
   currentPage: 1,
   hasNextPage: false,
   totalPages: 1,
-  totalResults: 8,
+  totalResults: 10,
   results: [
     {
-      id: 'solo-leveling',
-      title: 'Solo Leveling',
-      image: 'https://img-r1.2xstorage.com/thumb/solo-leveling.webp',
+      id: 'kimetsu-no-yaiba',
+      title: 'Kimetsu No Yaiba',
+      image: 'https://img-r2.2xstorage.com/thumb/kimetsu-no-yaiba.webp',
+      description: 'Tanjiro Kamado is a kindhearted boy...',
+      matchedVia: 'alias-malsync',
       headerForImage: { Referer: 'https://www.manganato.gg/' }
     },
     {
-      id: 'solo-leveling-ragnarok',
-      title: 'Solo Leveling Ragnarok',
+      id: 'demon-slayer-kimetsu-academy',
+      title: 'Demon Slayer Kimetsu Academy',
       approximateTitle: true,
+      matchedVia: 'alias-anilist-title',
+      headerForImage: { Referer: 'https://www.manganato.gg/' }
+    },
+    {
+      id: 'demon-slayer-tanjiro-kanao-doujinshi',
+      title: 'Demon Slayer Tanjiro Kanao Doujinshi',
+      approximateTitle: true,
+      matchedVia: 'slug-index',
       headerForImage: { Referer: 'https://www.manganato.gg/' }
     }
     {...}
     ...
-  ]
+  ],
+  diagnostics: {
+    strategy: [ 'alias-malsync', 'alias-anilist-title', 'slug-index' ],
+    indexedSlugs: 93735,
+    aliasBridgeRan: true,
+    aliasCandidates: 6
+  }
 }
 ```
 
-> **Search is a slug index, not the site's search engine.** The site's own `/search/story/`
-> endpoint is blocked (403 to every non-browser client, and disallowed in `robots.txt`), so results
-> are ranked against the slugs advertised in the sitemap. Two consequences:
-> - It matches on the URL slug, which encodes only ONE title. `"demon slayer"` will **not** find
->   `kimetsu-no-yaiba`, and `"shingeki no kyojin"` will not find `attack-on-titan`. There is no
->   fuzzy matching, so typos return nothing.
-> - Results carrying `approximateTitle: true` had their title de-slugified from the URL, so
->   punctuation and capitalisation are approximations. Only an exact-slug top hit gets a real
->   title and cover. Treat approximate titles as low-confidence when matching against AniList/MAL.
->
-> `clearSearchIndex()` drops the cached sitemap index (TTL 6h) for long-lived processes.
+#### How search works, and what it cannot do
+
+The site's own search API is **real but unreachable**. Its frontend (`/js/fsearch.js`) calls
+`GET /home/search/json?searchword=<q>`, which `robots.txt` does not disallow — but that path and
+`/search/story/` both answer `403` with `cf-mitigated: challenge` for every client tried (honest
+and browser-claiming UAs, with and without `X-Requested-With`, GET and POST, on all four sibling
+hosts). The block is **path**-scoped: `/manga/…`, `/api/manga/…` and `/manga-list/…` return `200`
+on the same connection. Clearing a managed challenge needs a real browser, so search is answered
+from two other corpora:
+
+1. **A sitemap slug index** (~94k slugs, cached 6h) — the site's catalogue, keyed by *slug*.
+2. **An alias bridge** — AniList synonyms plus MAL-Sync's exact MangaNato identifier. It runs
+   **only** when the query is not already an exact slug, so common queries cost no off-site request.
+
+The bridge is what makes cross-romanisation search work: `"demon slayer"` → AniList `87216` /
+MAL `96792` → MAL-Sync's MangaNato identifier `kimetsu-no-yaiba`. `"shingeki no kyojin"` finds
+`attack-on-titan` the same way. Without it the slug index answered `"demon slayer"` with nine
+doujinshi and colour re-releases and never mentioned the real series.
+
+**An alias is attested, then confirmed.** AniList and MAL-Sync only assert that a series exists and
+what it is called; neither knows this site's stock. Every alias slug is checked against the sitemap
+index, or (for at most 2 slugs the index does not list) by fetching `/manga/<slug>` and requiring a
+`200`. Nothing unconfirmed is returned.
+
+Remaining limits, stated plainly:
+- **Series AniList does not carry** are unreachable — the bridge is only as broad as AniList's manga catalogue.
+- **Typos** still fail: slug matching is substring/token containment with no edit distance.
+- **No author, genre or description search.**
+- Results flagged `approximateTitle: true` had their title de-slugified from the URL. Only the top
+  hit is enriched from its real detail page. Treat approximate titles as low-confidence when
+  matching against AniList/MAL.
+
+Every result carries `matchedVia` (`alias-malsync` | `alias-anilist-title` | `slug-index` |
+`slug-probe` | `browse-listing`).
+
+> **Degraded answers are loud.** Any empty or degraded result set populates `diagnostics.warning`
+> (and logs it), so `"the series is absent"` is always distinguishable from `"the sitemap was
+> unreachable"` or `"AniList rate-limited us"` — a bare `[]` never has to be interpreted.
+
+Set `useAliasResolution = false` to switch the bridge off entirely (no AniList/MAL-Sync request on
+any path); search is then the slug index alone, and every non-exact query says so in
+`diagnostics.warning`. `clearSearchIndex()` drops the cached sitemap index **and** the alias cache.
 
 ### fetchMangaInfo
 

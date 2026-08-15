@@ -6,6 +6,7 @@ import {
   MALSYNC_UNMAPPED_SITES,
   PROVIDERS_WITHOUT_MALSYNC_COVERAGE,
   MalSyncIndex,
+  MangaAliasResolver,
   MangaDexXref,
   pickSiteEntry,
   type IMalSyncSiteBinding,
@@ -303,6 +304,20 @@ export interface IMangaMetadataLayer {
   bridges: IMangaIdBridge[];
   xref: MangaDexXref;
   malsync: MalSyncIndex;
+  /**
+   * The INVERSE lookup: free text → attested series identities → exact provider ids.
+   *
+   * Everything else in this layer answers "given an AniList id, which record is this on provider
+   * X?". A provider whose own search endpoint is unusable has the opposite problem, and solving it
+   * with the same two upstreams is what lets `demon slayer` reach the slug `kimetsu-no-yaiba` on
+   * MangaKakalot/MangaNato — see src/providers/manga/mangakakalot.ts.
+   *
+   * It is exposed HERE, on the shared layer, for the same reason everything else is: it is built
+   * over the same client and the same `MalSyncIndex`, so its MAL-Sync lookups hit caches the
+   * bridges have already warmed instead of duplicating them. A provider that accepts one (
+   * `MangaKakalot.setAliasResolver`) should be handed this instance rather than building its own.
+   */
+  aliases: MangaAliasResolver;
 }
 
 export interface IMangaMetadataLayerOptions extends IVerifiedMangaMetadataResolverOptions {
@@ -310,6 +325,8 @@ export interface IMangaMetadataLayerOptions extends IVerifiedMangaMetadataResolv
   malSyncBaseUrl?: string;
   /** Override the MangaDex API base url. */
   mangaDexApiUrl?: string;
+  /** Override the AniList GraphQL url used by the alias resolver (tests, mirrors). */
+  aniListApiUrl?: string;
   /** Override the site→provider bindings. */
   bindings?: readonly IMalSyncSiteBinding[];
 }
@@ -347,6 +364,8 @@ export const createMangaMetadataLayer = (
     bridges: [new MangaDexLinksBridge(xref), new MalSyncBridge(malsync, options.bindings)],
     xref,
     malsync,
+    // Same client, same MalSyncIndex — so an alias lookup reuses whatever the bridges already cached.
+    aliases: new MangaAliasResolver(client, malsync, options.aniListApiUrl),
   };
 };
 
@@ -363,6 +382,21 @@ export const describeMangaMetadataLayer = (bindings: readonly IMalSyncSiteBindin
     { name: 'malsync', via: 'malsync', covers: bindings.map(b => b.provider) },
   ],
   malSyncBindings: bindings.map(b => ({ site: b.site, provider: b.provider, provenance: b.provenance })),
+  /**
+   * The same two upstreams run in reverse for providers whose own search is unreachable. Listed
+   * here because it changes what a binding is FOR: the MangaNato binding below is no longer only an
+   * id bridge for the aggregator, it is also how a free-text query reaches a slug.
+   */
+  aliasBridge: {
+    purpose: 'free-text query → AniList synonyms + MAL-Sync provider identifier → provider id',
+    upstreams: ['AniList Page.media(search, type: MANGA)', 'MAL-Sync /mal/manga/<idMal>'],
+    consumers: ['MangaKakalot'],
+    ranking: 'best title similarity (subtitle-aware), ties broken by AniList popularity',
+    guarantee:
+      'an alias is only ATTESTED by AniList/MAL-Sync; the consuming provider must confirm the id ' +
+      'exists on its own site before returning it. MangaKakalot confirms against its sitemap index ' +
+      'or a bounded number of direct /manga/<slug> fetches.',
+  },
   malSyncUnmappedSites: MALSYNC_UNMAPPED_SITES.map(s => ({ ...s })),
   providersWithoutMalSyncCoverage: [...PROVIDERS_WITHOUT_MALSYNC_COVERAGE],
   caveats: [
