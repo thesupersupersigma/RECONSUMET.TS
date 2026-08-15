@@ -29,16 +29,21 @@
 //   CURL_IMPERSONATE_ARGS  extra args for the binary (e.g. "--impersonate chrome124" for the single-binary
 //                          builds; leave empty when using the curl_chromeNNN wrapper scripts).
 //   TLS_IMPERSONATE_HOSTS  comma-list of host suffixes routed through curl-impersonate (default flixcloud.cc,overcdn.site)
+//   RATE_LIMIT_IMAGE       per-IP/min for /manga/image, default 300. Its OWN tier so a manga reader
+//                          and a video stream cannot evict each other; 0 disables (exempts) it.
+//   (manga-only knobs — MANGA_TIMEOUT_MS, MANGA_READ_TIMEOUT_MS, MANGA_IMAGE_TIMEOUT_MS,
+//    MANGA_IMAGE_MAX_BYTES, MANGA_DIRECT_IMAGE_HOSTS — are read by and documented in
+//    api/src/manga-routes.mjs.)
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import { Readable } from 'node:stream';
 import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import { assertUrlSafe, followSafeRedirects, SsrfError } from './ssrf-guard.mjs';
-import mangaRoutes from './manga-routes.mjs';
+import mangaRoutes, { createMangaAggregator } from './manga-routes.mjs';
 import pkg from '../../consumet/dist/index.js';
 
-const { AnimeAggregator } = pkg;
+const { AnimeAggregator, MangaAggregator } = pkg;
 
 const PORT = Number(process.env.PORT) || 3000; // explicit default 3000; production sets PORT=4000
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
@@ -114,6 +119,16 @@ const app = Fastify({ logger: true, trustProxy: RL_TRUST_PROXY });
 await app.register(cors, { origin: '*' });
 
 const agg = new AnimeAggregator();
+// The manga surface's aggregator. Constructed HERE, next to the anime one, so this file keeps the
+// single import of the consumet bundle and api/src/manga-routes.mjs can stay free of it (a manga
+// provider that ships broken must not be able to break the routes module's import graph).
+//
+// The one piece of wiring it needs is the `imageProxy` seam — the function that turns each page's
+// raw upstream URL into a /manga/image link on THIS deployment's origin, with the per-page Referer
+// baked in. That is installed by createMangaAggregator, which lives in manga-routes.mjs next to the
+// route those links point at (see the AsyncLocalStorage note there for why the origin cannot be a
+// plain constructor argument). The class is passed in so the dist import stays in this file alone.
+const mangaAgg = createMangaAggregator(MangaAggregator);
 
 // in-memory fixed-window buckets keyed by tier+IP; private/loopback IPs bypass (internal workers).
 const rlBuckets = new Map();
@@ -377,19 +392,24 @@ app.get('/', { preHandler: rateLimit('root') }, async () => {
     name: 'anime-api',
     status: 'ok',
     providers: agg.providers.map(p => p.name),
+    // A DIFFERENT provider set, not a subset: the manga registry shares no provider with the anime
+    // one. Listed because it is also the set of valid ?provider= values on /manga/chapters and
+    // /manga/read, both of which 400 with this same list on a typo.
+    mangaProviders: mangaAgg.providerNames,
     routes: {
       search: 'GET /search?q=<query>&page=1',
       info: 'GET /info/:anilistId   (provider mappings = available sources)',
       episodes: 'GET /episodes/:anilistId?provider=Gogoanime',
       watch: 'GET /watch?provider=Gogoanime&episodeId=<id>   (returns proxied sources for sub and dub)',
       proxy: 'GET /proxy?url=<encoded>&ref=<encoded referer>&pk=<encoded>   (HLS/segment/subtitle proxy)',
-      // Manga surface — route shape is final, handlers currently answer 501 (provider triage pending).
+      // Manga surface. All five routes are live against MangaAggregator; /manga/image serves the
+      // bytes that /manga/read's pages[].img links point at.
       manga: {
         search: 'GET /manga/search?q=<query>&page=1',
         info: 'GET /manga/info/:anilistId   (AniList MANGA id space — NOT the anime id)',
         chapters: 'GET /manga/chapters/:anilistId?provider=<name>&lang=en',
         read: 'GET /manga/read?provider=<name>&chapterId=<id>&lang=en',
-        image: 'GET /manga/image?url=<encoded>&ref=<encoded referer>   (Referer-injecting image proxy)',
+        image: 'GET /manga/image?url=<encoded>&ref=<encoded referer>   (Referer-injecting, image-only page proxy)',
       },
     },
   };
@@ -578,11 +598,16 @@ app.get('/proxy', { preHandler: rateLimit('proxy') }, async (req, reply) => {
 
 // ---- manga surface ----
 // Registered from its own module so the video-proxy machinery above and the manga layer stay
-// independently readable. The guards are handed in rather than imported, so manga inherits the
-// EXACT same API-key gate and per-IP tiers as the anime routes with no second implementation.
-// Every handler answers 501 today: the shapes and the SSRF guards are real, the providers are not
-// yet chosen. See api/src/manga-routes.mjs for the full rationale.
-await app.register(mangaRoutes, { apiGuard, rateLimit });
+// independently readable. The guards AND the aggregator are handed in rather than imported, so
+// manga inherits the EXACT same API-key gate and per-IP tiers as the anime routes with no second
+// implementation, and the routes module never reaches into consumet/dist itself.
+// All five routes are live. /manga/image is a Referer-injecting, image-ONLY sibling of /proxy
+// rather than a reuse of it: three of the six providers' CDNs cannot be linked directly at all
+// (403 on a browser's Referer, or a placeholder when a CORS-mode load sends Origin) and the other
+// three send no ACAO. It gets no `imageFetch` here, so it uses the real global fetch — that option
+// exists only so the offline suite can drive the real SSRF/redirect/sniffing path without sockets.
+// See api/src/manga-routes.mjs for the per-host measurements and the full rationale.
+await app.register(mangaRoutes, { aggregator: mangaAgg, apiGuard, rateLimit });
 
 app.setErrorHandler((err, _req, reply) => {
   app.log.error(err);

@@ -1,14 +1,25 @@
 // Black-box tests for the manga surface, in the same style as server-ssrf.test.mjs: spawn the real
 // src/server.mjs on a free loopback port and talk to it over HTTP.
 //
-// Two things are being proved, and only two — because only two are true yet:
-//   1. The route SHAPE is real. Every manga route exists, validates its params (400), and otherwise
-//      answers 501 with a machine-readable body. Nothing is falsely wired to a provider.
-//   2. The SSRF guard is ALREADY WIRED on the two URL-taking manga inputs (/manga/image?url= and
+// This file proves what must be true of the DEPLOYED server, with its REAL aggregator:
+//   1. Every manga route exists and validates its params (400) — including the four that are now
+//      wired, which are reachable here only up to the point where they would touch a provider.
+//   2. No route answers 501 any more — the manga surface is fully wired. /manga/image's byte path
+//      cannot be exercised here (it would need a real public upstream), so it is proved in
+//      manga-image.test.mjs against the same plugin with a faked socket layer; what IS proved here
+//      is that the deployed route is the real handler and not the old stub.
+//   3. The real MangaAggregator is actually installed (an unknown ?provider= comes back naming the
+//      real six-provider registry — MangaDex et al, not a fake).
+//   4. The SSRF guard is WIRED on the two URL-taking manga inputs (/manga/image?url= and
 //      /manga/read?chapterId=http...). This is the part that must never regress: it is checked with
 //      a local canary server that must never be contacted, exactly like the /proxy tests.
 //
-// Fully offline. Every request here is rejected or 501'd before any upstream is reached.
+// The WIRING of the four live routes — envelopes, matchConfidence, reason, Cache-Control, 502/504 —
+// is proved in manga-wired.test.mjs, which mounts the same plugin with a fake aggregator. It has to
+// be a separate server: exercising a wired route here would hit AniList and four scrapers.
+//
+// Fully offline. Every request here is rejected, 501'd, or answered from the registry before any
+// upstream is reached.
 //
 // Run: cd api && node --test 'test/**/*.test.mjs'
 
@@ -79,24 +90,48 @@ after(async () => {
   await new Promise(r => canary?.close(r));
 });
 
-// ------------------------------------------------------------------ shape: 501, not 404
+// ------------------------------------------------------------------ shape: mounted, not 404
 
-test('every manga route is mounted and answers 501, never 404', async () => {
-  const routes = [
-    '/manga/search?q=chainsaw%20man',
-    '/manga/info/105778',
-    '/manga/chapters/105778',
-    '/manga/chapters/105778?provider=MangaDex&lang=pt-br',
-    '/manga/read?provider=MangaDex&chapterId=abc-123',
-    '/manga/image?url=https%3A%2F%2F1.1.1.1%2Fpage-1.png',
+// Each of these reaches the handler and is answered WITHOUT any upstream call, so the route is
+// proved mounted (never 404, never Fastify's own 400) while staying offline. A 501 in this list
+// would mean the wiring was reverted.
+test('all five manga routes are mounted and none answers 501', async () => {
+  const cases = [
+    ['/manga/search', 400, /missing or empty 'q'/],
+    ['/manga/info/abc', 400, /anilistId must be numeric/],
+    ['/manga/chapters/abc', 400, /anilistId must be numeric/],
+    ['/manga/chapters/105778?provider=__nope__', 400, /unknown provider/],
+    ['/manga/read?provider=__nope__&chapterId=abc-123', 400, /unknown provider/],
+    // A repeated ?url= is answered by the multiplicity guard, which exists only in the wired
+    // route: the old 501 stub stringified the array into 'https://1.1.1.1/p.png,x', let it past
+    // assertUrlSafe (host 1.1.1.1, public) and answered 501. So this single case is an offline,
+    // network-free discriminator between the stub and the real handler on the DEPLOYED server —
+    // the byte-serving path itself is proved in manga-image.test.mjs.
+    [
+      '/manga/image?url=https%3A%2F%2F1.1.1.1%2Fp.png&url=x',
+      400,
+      /'url' and 'ref' must each be given at most once/,
+    ],
   ];
-  for (const r of routes) {
+  for (const [r, status, re] of cases) {
     const res = await fetch(`${base}${r}`);
-    assert.equal(res.status, 501, `${r} → ${res.status}`);
+    assert.equal(res.status, status, `${r} → ${res.status}`);
     const body = await res.json();
-    assert.match(body.error, /not wired yet/, r);
-    assert.ok(typeof body.route === 'string' && body.route.startsWith('GET /manga/'), `${r} lacks a route label`);
+    assert.match(body.error, re, r);
+    assert.doesNotMatch(body.error, /not wired yet/, `${r} is still stubbed`);
   }
+});
+
+// The proof that the REAL aggregator is what got wired in — a fake could not name these.
+test('the real six-provider manga registry is installed', async () => {
+  const res = await fetch(`${base}/manga/read?provider=__nope__&chapterId=abc-123`);
+  const body = await res.json();
+  assert.equal(res.status, 400);
+  assert.ok(Array.isArray(body.providers), 'the 400 does not name the registry');
+  for (const p of ['MangaDex', 'MangaHere', 'MangaPill']) {
+    assert.ok(body.providers.includes(p), `manga registry missing ${p}: ${body.providers.join(',')}`);
+  }
+  assert.ok(body.providers.length >= 6, `expected the six-provider working set, got ${body.providers.length}`);
 });
 
 test('the / route advertises the manga surface', async () => {
@@ -105,6 +140,10 @@ test('the / route advertises the manga surface', async () => {
   for (const k of ['search', 'info', 'chapters', 'read', 'image']) {
     assert.ok(body.routes.manga[k], `root listing missing manga.${k}`);
   }
+  // Manga providers are a DIFFERENT set from the anime ones, and are also the valid ?provider=
+  // values, so the root route lists both.
+  assert.ok(Array.isArray(body.mangaProviders) && body.mangaProviders.includes('MangaDex'));
+  assert.ok(!body.providers.includes('MangaDex'), 'the anime provider list absorbed a manga provider');
   // the anime surface must be untouched
   for (const k of ['search', 'info', 'episodes', 'watch', 'proxy']) {
     assert.ok(body.routes[k], `anime route listing lost ${k}`);
@@ -113,7 +152,7 @@ test('the / route advertises the manga surface', async () => {
 
 // ------------------------------------------------------------------ param validation (real, not stubbed)
 
-test('manga routes reject bad params with 400 before reaching the 501', async () => {
+test('manga routes reject bad params with 400 before reaching a provider', async () => {
   const cases = [
     ['/manga/search', /missing or empty 'q'/],
     ['/manga/search?q=%20%20', /missing or empty 'q'/],
@@ -216,11 +255,15 @@ test('/manga/read never contacts an internal target named by chapterId (blind SS
 });
 
 test('/manga/read leaves ordinary slug chapterIds and public URLs alone', async () => {
-  // Not rejected by the guard — they fall through to the 501 stub, which is how we tell
-  // "the guard fired" (400) apart from "the guard correctly stood aside" (501).
+  // Not rejected by the guard — they fall through PAST it to the provider-name check, which is how
+  // we tell "the guard fired" from "the guard correctly stood aside". Both answer 400 now (the
+  // provider here is deliberately bogus so nothing upstream is contacted), so the discriminator is
+  // the message, not the status.
   for (const id of ['723-10001000/chainsaw-man-chapter-1', 'a77742b1-befd-49a4-bff5-1ad4e6b0ef7b', 'https://1.1.1.1/ch/1']) {
     const res = await read(id);
-    assert.equal(res.status, 501, `${id} → ${res.status}`);
-    assert.doesNotMatch((await res.json()).error, /chapterId' rejected/, id);
+    assert.equal(res.status, 400, `${id} → ${res.status}`);
+    const body = await res.json();
+    assert.doesNotMatch(body.error, /chapterId' rejected/, id);
+    assert.match(body.error, /unknown provider/, id);
   }
 });
