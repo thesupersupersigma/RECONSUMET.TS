@@ -178,6 +178,24 @@ const apiGuard = tier => [requireApiKey, rateLimit(tier)];
 
 // validation helpers
 const isNumericId = v => /^\d+$/.test(String(v ?? ''));
+/**
+ * A REPEATED query param (`?x=a&x=b`) arrives from Fastify's querystring parser as an ARRAY, not a
+ * string. Every guard in this file is written as a string test — `typeof v === 'string' && ...`,
+ * `v.startsWith(...)`, a regex — so an array either skips the guard entirely or gets silently
+ * stringified with a comma past it. This is a property of the PARSER, not of any one param, so
+ * every user-controlled query value below is checked with this before it is used.
+ *
+ * DUPLICATED, deliberately: a BYTE-IDENTICAL `isSingle` lives in api/src/manga-routes.mjs (grep
+ * `const isSingle`) and is used by /manga/read and /manga/image. Both copies exist on purpose (a
+ * one-liner is cheaper than a cross-module import); if you change one, change the other. Cited by
+ * name rather than by line number on purpose — the first pointer here named a line, and an
+ * unrelated doc edit to manga-routes.mjs shifted the definition out from under it.
+ */
+const isSingle = v => v === undefined || typeof v === 'string';
+/** Escape a user-supplied string for literal use inside a RegExp source. */
+const reEscape = s => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/** Strip CR/LF from a value destined for an outbound request HEADER (header-injection guard). */
+const headerSafe = v => (typeof v === 'string' ? v.replace(/[\r\n]/g, '') : v);
 const isHttpUrl = v => {
   try {
     const u = new URL(v);
@@ -225,7 +243,12 @@ const setDefaultAudio = (text, aud) => {
     .split('\n')
     .map(line => {
       if (!line.startsWith('#EXT-X-MEDIA:') || !/TYPE=AUDIO/.test(line)) return line;
-      const target = new RegExp(`LANGUAGE="${aud}"`, 'i').test(line);
+      // `aud` is a raw query param, so it is regex-ESCAPED before interpolation. Unescaped, a
+      // crafted ?aud= is a regex-injection primitive on an unauthenticated route: `?aud=(` makes
+      // `new RegExp` throw (500), and `?aud=(x+x+)+y` builds a catastrophically-backtracking
+      // pattern that is re-run for every audio line of the playlist. Escaping is behaviour-neutral
+      // for the real values (ISO-639 codes like `eng`/`ja-JP` contain no metacharacters).
+      const target = new RegExp(`LANGUAGE="${reEscape(aud)}"`, 'i').test(line);
       const stripped = line.replace(/,DEFAULT=(?:YES|NO)/gi, '').replace(/,AUTOSELECT=(?:YES|NO)/gi, '');
       return stripped + (target ? ',DEFAULT=YES,AUTOSELECT=YES' : ',DEFAULT=NO,AUTOSELECT=NO');
     })
@@ -422,6 +445,9 @@ app.get('/', { preHandler: rateLimit('root') }, async () => {
 });
 
 app.get('/search', { preHandler: apiGuard('default') }, async (req, reply) => {
+  // Repeated params (see isSingle): both reads here already fail CLOSED, so they need no extra
+  // check. `?q=a&q=b` is an array → the typeof test below fails → q = '' → 400 (verified, not
+  // assumed). `?page=1&page=2` is an array → Number([...]) is NaN → `|| 1` → page 1, the default.
   const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
   if (!q) return reply.code(400).send({ error: "missing or empty 'q' query param" });
   const page = Number(req.query.page) || 1;
@@ -446,6 +472,11 @@ app.get('/info/:anilistId', { preHandler: apiGuard('scrape') }, async (req, repl
 app.get('/episodes/:anilistId', { preHandler: apiGuard('scrape') }, async (req, reply) => {
   if (!isNumericId(req.params.anilistId))
     return reply.code(400).send({ error: 'anilistId must be numeric' });
+  // A repeated ?provider= is an array; the aggregator calls providerName.toLowerCase() on it and
+  // dies with a TypeError that surfaced as a 502 leaking "name.toLowerCase is not a function".
+  // That is a 400-class client error, so it is answered as one, before the aggregator is touched.
+  if (!isSingle(req.query.provider))
+    return reply.code(400).send({ error: "'provider' must be given at most once" });
   try {
     return await agg.getEpisodes(req.params.anilistId, req.query.provider);
   } catch (e) {
@@ -467,6 +498,19 @@ app.get('/watch', { preHandler: apiGuard('watch') }, async (req, reply) => {
   const { provider, episodeId } = req.query;
   if (!provider || !episodeId) {
     return reply.code(400).send({ error: "missing 'provider' and/or 'episodeId' query params" });
+  }
+  // Repeated-param guard, and it is load-bearing for the SSRF check below, not cosmetic:
+  // `?episodeId=x&episodeId=y` arrives as an ARRAY, an array is not `typeof 'string'`, so the
+  // assertUrlSafe() call below was skipped ENTIRELY and the value flowed on to the provider —
+  // while `?episodeId=http://169.254.169.254/x&episodeId=` stringifies to the perfectly valid URL
+  // "http://169.254.169.254/x," for anything downstream that interpolates rather than calling
+  // .startsWith(). None of the 13 registered providers stringify today (they all TypeError on
+  // .startsWith/.split first — measured, every one 502s without opening a socket), so this was a
+  // latent hole rather than a live one; it is closed at the boundary so it cannot be re-opened by
+  // a provider edit. `provider` is checked for the same reason: an array reaches the aggregator,
+  // which TypeErrors on providerName.toLowerCase() and answers a misleading 502.
+  if (!isSingle(provider) || !isSingle(episodeId)) {
+    return reply.code(400).send({ error: "'provider' and 'episodeId' must each be given at most once" });
   }
   // M2 SSRF guard: several providers (gogoanime, anizone, anineko, animenosub, senshi) treat an
   // episodeId that starts with "http" as a full URL and fetch it directly. That makes episodeId a
@@ -533,12 +577,32 @@ app.get('/watch', { preHandler: apiGuard('watch') }, async (req, reply) => {
 // directly, so they can't carry an x-api-key header. Rate-limited on its own high 'proxy' tier.
 app.get('/proxy', { preHandler: rateLimit('proxy') }, async (req, reply) => {
   const target = req.query.url;
-  const ref = req.query.ref;
+  const rawRef = req.query.ref;
   const pk = req.query.pk;
-  const km = req.query.km;
-  const org = req.query.org; // segment-CDN Origin (KickAssAnime segments 403 without it)
+  const rawKm = req.query.km;
+  const rawOrg = req.query.org; // segment-CDN Origin (KickAssAnime segments 403 without it)
   const aud = req.query.aud; // default-audio language for the HLS master (KickAssAnime dub)
   if (!target) return reply.code(400).send({ error: "missing 'url' query param" });
+  // EVERY param on this route is checked for multiplicity, not just the fetched one — a repeated
+  // param is an array and each of these is consumed as a string further down:
+  //   url → assertUrlSafe/new URL (an array stringifies identically in the guard and in the fetch,
+  //         so it is not a bypass — measured: ?url=<internal>&url= is still 400 with no socket —
+  //         but it is rejected here so the route never depends on that coincidence);
+  //   ref, org → outbound Referer/Origin HEADERS, where an array becomes "a,b";
+  //   km → the x-am-media-id header AND the AES key derivation;
+  //   pk → Buffer.from(v,'base64'), which for an ARRAY takes the array-of-octets overload and
+  //        silently yields a zero key instead of decoding anything;
+  //   aud → interpolated into a RegExp.
+  // None of those want an array, so none of them get one.
+  if (![target, rawRef, pk, rawKm, rawOrg, aud].every(isSingle))
+    return reply.code(400).send({ error: "'url', 'ref', 'pk', 'km', 'org' and 'aud' must each be given at most once" });
+  // ref/org/km land in outbound request headers. undici rejects a CRLF-bearing header value (the
+  // plain-fetch path fails closed with a 502), but the curl-impersonate path passes them as `-H`
+  // argv where nothing would split them — so they are newline-stripped here, once, for both paths.
+  // Same treatment /manga/image already gives its own `ref`.
+  const ref = headerSafe(rawRef);
+  const km = headerSafe(rawKm);
+  const org = headerSafe(rawOrg);
   // SSRF guard: scheme + private/loopback/link-local/metadata range blocking, resolving DNS. Redirect
   // targets are re-validated inside proxiedUpstream's plain-fetch path (followSafeRedirects).
   try {
