@@ -53,6 +53,63 @@ class MangaDex extends MangaParser {
     return Object.values(map).find((value): value is string => typeof value === 'string' && value.length > 0);
   };
 
+  /**
+   * When a chapter became readable, as an ISO-8601 instant — `readableAt`, NOT `publishAt`.
+   *
+   * MangaDex carries BOTH and they are not interchangeable. `publishAt` is a *scheduling* field:
+   * the moment the chapter becomes visible on mangadex.org. For a chapter MangaDex only indexes
+   * and never hosts (MangaPlus/Webnovel stubs) that moment never comes, so MangaDex parks
+   * `publishAt` on the far-future sentinel **2037-12-31T15:00:00+00:00** while `readableAt` holds
+   * the real date.
+   *
+   * The sentinel is RARE BUT PERFECTLY CORRELATED WITH UNREADABILITY, and that correlation, not a
+   * headline percentage, is the argument. Measured live 2026-08-14:
+   *   - `/chapter?limit=100&order[publishAt]=desc`, first 1000 records: 464 carry the sentinel.
+   *     That 46% is an ARTEFACT OF THE SORT — descending on the field under test rakes every
+   *     sentinel row to the top — so read it as "the site-wide sentinel population is ~464
+   *     chapters", not as a population rate.
+   *   - the same 1000 records ordered by `readableAt` instead: **0** sentinels. Unbiased by the
+   *     field under test, the sentinel is invisible.
+   *   - of those 464 sentinel chapters, **464/464 have `externalUrl` set and `pages === 0`**, and
+   *     all 464 point at mangaplus.shueisha.co.jp. Not one is a readable chapter.
+   * So `publishAt` is wrong on a small set of chapters, and that set is EXACTLY the set this
+   * provider marks `readable: false` — i.e. exactly the rows a reader is already being told they
+   * cannot open. Emitting it would have printed "2037" beside them and nowhere else.
+   *
+   * It is reachable from this provider's own feed query, not a curiosity of some other endpoint:
+   * Takopii no Genzai ch.1-3 come back from `/manga/{id}/feed?translatedLanguage[]=en` with
+   * `publishAt` 2037-12-31 / `readableAt` 2022-02-24, `externalUrl` set, `pages` 0.
+   *
+   * `readableAt` is also the field MangaDex offers as a sort key for a "latest chapters" view
+   * (`order[readableAt]`, verified live), which is the view a client renders these dates in. (What
+   * mangadex.org paints in the DOM could not be diffed against this — the site is a client-rendered
+   * SPA and serves no dates in its HTML.)
+   *
+   * Where nothing diverges the two agree and the choice is free: all 425 English Berserk chapters
+   * have `publishAt === readableAt`. Note neither field is the original magazine date — Berserk's
+   * oldest English chapter reads 2018 for a 1989 manga. Both are MangaDex-side timestamps, which
+   * is the honest thing to show beside a MangaDex chapter.
+   *
+   * Normalised through `toISOString()` because `IMangaChapter.releaseDate` is a **string**, and ISO
+   * is what every provider that has a real timestamp to hand emits (see `asIsoDate` in
+   * flamescans.ts). That also collapses MangaDex's `+00:00` offset to `Z` and drops anything
+   * unparseable rather than passing garbage on to a client's `new Date(...)`.
+   *
+   * ISO IS NOT A TREE-WIDE INVARIANT, and a client must not assume it. `releaseDate` is a bare
+   * string on `IMangaChapter` and the scraping providers put the site's own rendering in it:
+   * MangaHere yields `"Nov 05,2018"` (via its misspelled `releasedDate`, which the aggregator maps
+   * across), MangaPark and VyvyManga yield whatever text the page showed. Since the servability
+   * policy landed, MangaHere is the provider that answers Solo Leveling and One Piece by default,
+   * so a single `/manga/chapters` caller really does see both shapes depending on the title.
+   * Parse defensively or render verbatim; do not assume `new Date(releaseDate)` succeeds.
+   */
+  private static chapterReleaseDate = (attributes: any): string | undefined => {
+    const raw = attributes?.readableAt;
+    if (typeof raw !== 'string' || raw === '') return undefined;
+    const date = new Date(raw);
+    return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+  };
+
   /** `altTitles` is an array of single-key maps; flatten it to one map, first occurrence winning. */
   private static flattenAltTitles = (altTitles: any): { [lang: string]: string } => {
     const flat: { [lang: string]: string } = {};
@@ -124,6 +181,20 @@ class MangaDex extends MangaParser {
           chapterNumber: chapter.attributes.chapter,
           volumeNumber: chapter.attributes.volume,
           pages: pageCount,
+          /** ISO-8601 string; see {@link MangaDex.chapterReleaseDate} for why `readableAt`. */
+          releaseDate: MangaDex.chapterReleaseDate(chapter.attributes),
+          /**
+           * The feed query hardcodes `translatedLanguage[]=en`, so this is always 'en' today — but
+           * it is a FACT off the chapter record rather than an assumption, and it is the key a
+           * consumer looks for. MangaAggregator is registered with `langModel: 'per-chapter'` for
+           * MangaDex on the strength of this field existing; without it the aggregator silently
+           * fell back to stamping the language from provider traits, which made the trait a claim
+           * about the query string rather than about the data.
+           */
+          translatedLanguage:
+            typeof chapter.attributes.translatedLanguage === 'string' && chapter.attributes.translatedLanguage
+              ? chapter.attributes.translatedLanguage
+              : undefined,
           externalUrl,
           /** false => {@link fetchChapterPages} will throw for this id; read it at `externalUrl`. */
           readable: externalUrl === null && pageCount > 0,
