@@ -4,6 +4,18 @@
   const asuraScans = new MANGA.AsuraScans();
 ```
 
+> **This provider was rewritten against a JSON API and every id shape changed.** It used to be
+> pinned to `asuracomic.net`, which now 301s to `https://asurascans.com/` **discarding the path and
+> the query** — so every request fetched the homepage, the old cheerio selectors matched nothing,
+> and `fetchMangaInfo('anything')` *resolved* with `{ title: 'Popular', chapters: [] }` instead of
+> throwing. It now reads `https://api.asurascans.com/api`, a clean unauthenticated JSON API, with
+> **no HTML scraping on the primary path**.
+>
+> Ids are now bare slugs (`solo-leveling`), not `series/<slug>-<hash>`, and images are on
+> `cdn.asurascans.com`, not `gg.asuracomic.net`. A full series URL such as
+> `https://asurascans.com/comics/solo-leveling-7e1f454a` is also accepted and normalises to the
+> bare slug.
+
 <h2>Methods</h2>
 
 - [search](#search)
@@ -12,16 +24,32 @@
 
 ### search
 > Note: This method is a subclass of the [`BaseParser`](https://github.com/consumet/extensions/blob/master/src/models/base-parser.ts) class, meaning it is available across most categories.
-> 
+
 <h4>Parameters</h4>
 
-| Parameter         | Type     | Description                                                                                |
-| ------------------| -------- | ------------------------------------------------------------------------------------------ |
-| query             | `string` | query to search for. (*In this case, we're searching for `Omniscient Reader’s Viewpoint`*) |
-| page (optional)   | `number` | page number (default: 1)                                                                   |
+| Parameter        | Type     | Description                                                      |
+| ---------------- | -------- | ---------------------------------------------------------------- |
+| query            | `string` | query to search for.                                             |
+| page (optional)  | `number` | 1-based page number (default: 1)                                 |
+| limit (optional) | `number` | results per page, **1..50** (default: 20)                        |
+
+<h4>Three upstream behaviours that silently return the wrong answer</h4>
+
+These are measured, not assumed, and the provider works around all three:
+
+- **`page` is not a parameter upstream.** `?page=2`, `?page=3`, `?page=99` all return page **one**
+  with `has_more: true` forever. The real cursor is `offset`, which is what this provider sends.
+  (Two pages fetched with `page=` were byte-identical; with `offset=` they are disjoint.)
+- **`limit` caps at 50 and does not clamp above it.** `limit=51`, `100`, `0` and `-1` all silently
+  yield 20 rows. A limit outside `1..50` is therefore **refused** with an error rather than sent.
+- **Past the last page `data` is `null`, not `[]`,** and `has_more` is *omitted* rather than sent as
+  `false`.
+
+There is deliberately **no `fetchPopular` / `fetchLatestUpdates`**: the `order` parameter is a coin
+flip — any non-empty value produces one fixed alternative ordering and the value itself is ignored.
 
 ```ts
-asuraScans.search('Omniscient Reader’s Viewpoint').then(data => {
+asuraScans.search('solo leveling').then(data => {
   console.log(data);
 })
 ```
@@ -31,15 +59,22 @@ output:
 {
     currentPage: 1,
     hasNextPage: false,
+    totalPages: 1,
+    totalResults: 2,
     results: [
     {
-        id: 'series/omniscient-readers-viewpoint-b88a351c',
-        title: 'Omniscient Reader’s Viewpoint',
-        image: 'https://gg.asuracomic.net/storage/media/105/conversions/9b59fdec-thumb-small.webp',
-        status: 'Ongoing',
-        latestChapter: 'Chapter 222',
-        rating: '10'
-    }
+        id: 'solo-leveling-ragnarok',
+        title: 'Solo Leveling: Ragnarok',
+        altTitles: [ '나 혼자만 레벨업 : 라그나로크', 'Only I Level Up: Ragnarok', ... ],
+        image: 'https://cdn.asurascans.com/asura-images/covers/solo-leveling-ragnarok.9ead3a.webp',
+        status: 'Hiatus',
+        type: 'manhwa',
+        rating: 9.532385466034755,
+        chapterCount: 68,
+        latestChapter: '68',
+        url: 'https://asurascans.com/comics/solo-leveling-ragnarok-7e1f454a'
+    },
+    {...},
     ]
 }
 ```
@@ -48,12 +83,12 @@ output:
 
 <h4>Parameters</h4>
 
-| Parameter | Type     | Description                                                    |
-| --------- | -------- | -------------------------------------------------------------- |
-| mangaId   | `string` | manga id (*can be found in the manga search results*)          |
+| Parameter | Type     | Description                                                                |
+| --------- | -------- | -------------------------------------------------------------------------- |
+| mangaId   | `string` | bare series slug, or a full `asurascans.com/comics/...` URL                 |
 
 ```ts
-asuraScans.fetchMangaInfo('series/solo-max-level-newbie-d9977a85').then(data => {
+asuraScans.fetchMangaInfo('solo-leveling').then(data => {
   console.log(data);
 })
 ```
@@ -61,88 +96,61 @@ returns a promise which resolves into an manga info object (including the chapte
 output:
 ```js
 {
-    id: '/series/solo-max-level-newbie-d9977a85',
-      title: 'Solo Max-Level Newbie',
-      image: 'https://gg.asuracomic.net/storage/media/1/conversions/047bc0bb-optimized.webp',
-      rating: '9.9',
-      status: 'Ongoing',
-      description: 'Jinhyuk, a gaming Nutuber, was the only person who saw the ending of the game [Tower of Trials].\n' +
-        "However, when the game's popularity declined, it became difficult for him to continue making a living as a gaming Nutuber.\n" +
-        `Since he already saw the ending of the game, he was about to quit playing. But that day, [Tower of Trials] became reality, and Jinhyuk, who knew about every single thing in the game, took over everything faster than anyone possibly could! "I'll show you what a true pro is like."`,
-      authors: [ 'Maslow' ],
-      artist: 'Swingbat',
-      updatedOn: 'August 7th 2024',
-      genres: [ 'Action', 'Adventure', 'Comedy', 'Fantasy', 'Game', 'Tower' ],
-      chapters: [
+    id: 'solo-leveling',
+    title: 'Solo Leveling',
+    image: 'https://cdn.asurascans.com/asura-images/covers/solo-leveling.c27830.webp',
+    cover: 'https://cdn.asurascans.com/asura-images/banners/solo-leveling.b0f7b9.webp',
+    altTitles: [ '나 혼자만 레벨업', 'Only I Level Up', 'Ore dake Level Up na Ken', ... ],  // 30 of them
+    status: 'Completed',
+    authors: [ '추공 (Chugong)' ],
+    artist: 'REDICE STUDIO',
+    genres: [ 'Action', 'Adventure', 'Fantasy', 'Shounen' ],
+    type: 'manhwa',
+    rating: 9.77649837614408,
+    bookmarkCount: 38432,
+    popularityRank: 35,
+    chapterCount: 201,
+    updatedOn: '2024-07-13T02:15:04Z',
+    url: 'https://asurascans.com/comics/solo-leveling-7e1f454a',
+    headers: { 'User-Agent': '...', Referer: 'https://asurascans.com/' },
+    description: '...',
+    recommendations: [ { id: 'infinite-mage', title: 'Infinite Mage', ... }, {...} ],
+    chapters: [
         {
-          id: 'solo-max-level-newbie-d9977a85/chapter/165',
-          title: 'Chapter 165 The Most Powerful Ally (1)',
-          releaseDate: 'August 1st 2024'
+          id: 'solo-leveling/chapter/200',
+          title: 'Side Story 21 { THE END }',
+          chapterNumber: '200',
+          pages: 15,
+          releaseDate: '2024-07-13T02:15:04Z',
+          views: 65246,
+          isLocked: false,
+          isPremium: false,
+          readable: true,
+          externalUrl: null
         },
-        {
-          id: 'solo-max-level-newbie-d9977a85/chapter/164',
-          title: 'Chapter 164',
-          releaseDate: 'July 25th 2024'
-        },
-        {
-          id: 'solo-max-level-newbie-d9977a85/chapter/163',
-          title: 'Chapter 163 Wailing Witch (1)',
-          releaseDate: 'July 18th 2024'
-        },
-        {
-          id: 'solo-max-level-newbie-d9977a85/chapter/162',
-          title: 'Chapter 162 Daily Life in Europe Vlog (2)',
-          releaseDate: 'July 14th 2024'
-        },
-        {...},
-    ]
-    recommendations: [
-        {
-          id: '/series/regressor-instruction-manual-1b1dc3a8',
-          title: 'Regressor Instruction Manual',
-          image: 'https://gg.asuracomic.net/storage/media/276/conversions/01J4CG9ADBTWY617STXHGNTBKP-optimized.webp',
-          latestChapter: 'Chapter 103',
-          status: 'Ongoing',
-          rating: '10'
-        },
-        {
-          id: '/series/the-s-classes-that-i-raised-424cbecc',
-          title: 'The S-Classes That I Raised',
-          image: 'https://gg.asuracomic.net/storage/media/8/conversions/9b10db26-optimized.webp',
-          latestChapter: 'Chapter 147',
-          status: 'Ongoing',
-          rating: '9.9'
-        },
-        {
-          id: '/series/return-of-the-shattered-constellation-1b655e30',
-          title: 'Return Of The Shattered Constellation',
-          image: 'https://gg.asuracomic.net/storage/media/13/conversions/5cfa2551-optimized.webp',
-          latestChapter: 'Chapter 120',
-          status: 'Ongoing',
-          rating: '9.8'
-        },
-        {
-          id: '/series/duke-pendragon-9dfcab6a',
-          title: 'Duke Pendragon',
-          image: 'https://gg.asuracomic.net/storage/media/18/conversions/44b24afa-optimized.webp',
-          latestChapter: 'Chapter 120',
-          status: 'Ongoing',
-          rating: '9.9'
-        }
+        {...},   // 201 in total, newest first
     ]
 }
 ```
+
+Unknown slugs **throw** (`HTTP 404: series not found`) rather than resolving with an empty object —
+the fail-open behaviour of the old provider is gone.
+
+<h4>Status values</h4>
+
+Five real values are mapped, including `Hiatus` and `Axed` — together roughly 40% of the catalogue.
+Anything that only handles Ongoing/Completed will mislabel a large slice of this site.
 
 ### fetchChapterPages
 
 <h4>Parameters</h4>
 
-| Parameter | Type     | Description                                              |
-| --------- | -------- | -------------------------------------------------------- |
-| chapterId | `string` | chapter id (*can be found in the manga info*)            |
+| Parameter | Type     | Description                                                    |
+| --------- | -------- | -------------------------------------------------------------- |
+| chapterId | `string` | `'<slug>/chapter/<number>'` (*from the manga info*)             |
 
 ```ts
-asuraScans.fetchChapterPages('solo-max-level-newbie-d9977a85/chapter/66').then(data => {
+asuraScans.fetchChapterPages('solo-leveling/chapter/1').then(data => {
   console.log(data);
 })
 ```
@@ -151,79 +159,66 @@ output:
 ```js
 [
     {
-        img: 'https://gg.asuracomic.net/storage/comics/3/6d12ee5d-ce6f-4d3a-8074-3d977efdc422/01.webp',
-        page: 1
+        page: 1,
+        img: 'https://cdn.asurascans.com/asura-images/chapters/solo-leveling/1/001.webp?v=1770499638',
+        headers: { 'User-Agent': '...', Referer: 'https://asurascans.com/' }
     },
-    {
-        img: 'https://gg.asuracomic.net/storage/comics/3/6d12ee5d-ce6f-4d3a-8074-3d977efdc422/02.webp',
-        page: 2
-    },
-    {
-        img: 'https://gg.asuracomic.net/storage/comics/3/6d12ee5d-ce6f-4d3a-8074-3d977efdc422/03.webp',
-        page: 3
-    },
-    {
-        img: 'https://gg.asuracomic.net/storage/comics/3/6d12ee5d-ce6f-4d3a-8074-3d977efdc422/04.webp',
-        page: 4
-    },
-    {
-        img: 'https://gg.asuracomic.net/storage/comics/3/6d12ee5d-ce6f-4d3a-8074-3d977efdc422/05.webp',
-        page: 5
-    },
-    {
-        img: 'https://gg.asuracomic.net/storage/comics/3/6d12ee5d-ce6f-4d3a-8074-3d977efdc422/06.webp',
-        page: 6
-    },
-    {
-        img: 'https://gg.asuracomic.net/storage/comics/3/6d12ee5d-ce6f-4d3a-8074-3d977efdc422/07.webp',
-        page: 7
-    },
-    {
-        img: 'https://gg.asuracomic.net/storage/comics/3/6d12ee5d-ce6f-4d3a-8074-3d977efdc422/08.webp',
-        page: 8
-    },
-    {
-        img: 'https://gg.asuracomic.net/storage/comics/3/6d12ee5d-ce6f-4d3a-8074-3d977efdc422/09.webp',
-        page: 9
-    },
-    {
-        img: 'https://gg.asuracomic.net/storage/comics/3/6d12ee5d-ce6f-4d3a-8074-3d977efdc422/10.webp',
-        page: 10
-    },
-    {
-        img: 'https://gg.asuracomic.net/storage/comics/3/6d12ee5d-ce6f-4d3a-8074-3d977efdc422/11.webp',
-        page: 11
-    },
-    {
-        img: 'https://gg.asuracomic.net/storage/comics/3/6d12ee5d-ce6f-4d3a-8074-3d977efdc422/12.webp',
-        page: 12
-    },
-    {
-        img: 'https://gg.asuracomic.net/storage/comics/3/6d12ee5d-ce6f-4d3a-8074-3d977efdc422/13.webp',
-        page: 13
-    },
-    {
-        img: 'https://gg.asuracomic.net/storage/comics/3/6d12ee5d-ce6f-4d3a-8074-3d977efdc422/14.webp',
-        page: 14
-    },
-    {
-        img: 'https://gg.asuracomic.net/storage/comics/3/6d12ee5d-ce6f-4d3a-8074-3d977efdc422/15.webp',
-        page: 15
-    },
-    {
-        img: 'https://gg.asuracomic.net/storage/comics/3/6d12ee5d-ce6f-4d3a-8074-3d977efdc422/16.webp',
-        page: 16
-    },
-    {
-        img: 'https://gg.asuracomic.net/storage/comics/3/6d12ee5d-ce6f-4d3a-8074-3d977efdc422/17.webp',
-        page: 17
-    },
-    {
-        img: 'https://gg.asuracomic.net/storage/comics/3/6d12ee5d-ce6f-4d3a-8074-3d977efdc422/18.webp',
-        page: 18
-    }
-    {...},
+    {...},   // 22 pages
 ]
 ```
+
+> **The chapter number stays a string, and can be fractional.** `'solo-leveling/chapter/0.5'` is a
+> real chapter, and chapter `0` exists too. The chapter's own `slug` is **not** usable as an
+> addressing key — it is a UUID on older series and `chapter-139` on newer ones — which is why the
+> id is built from `number`.
+
+<h4>Locked / early-access chapters</h4>
+
+An early-access chapter answers **HTTP 200** with `is_locked: true`, `chapter.pages: null` and
+`page_count: 0`, which maps naively to `[]` and a blank reader. Following the house convention set
+on `mangadex`:
+
+- `fetchChapterPages` **throws** a descriptive error naming the lock and its unlock time.
+- `fetchMangaInfo` **pre-flags** those chapters up front, so a caller never has to reach the throw:
+  `readable: false` plus `externalUrl` (the two fields `MangaAggregator` reads), alongside
+  `isLocked` / `isPremium` / `unlockTime`. The aggregator maps `isLocked` to
+  `unavailable.reason: 'locked'` and `isPremium` to `'premium'`, with `unlockTime` as the detail.
+
+```js
+{
+  id: 'some-series/chapter/30',
+  title: 'Chapter 30',
+  chapterNumber: '30',
+  pages: 0,
+  isLocked: true,
+  isPremium: true,
+  unlockTime: '2026-08-15T00:05:48Z',
+  readable: false,
+  externalUrl: 'https://asurascans.com/comics/some-series/chapter/30'
+}
+```
+
+Only `is_locked` gates `readable`. A chapter that is premium but *not* locked is left readable —
+absence of evidence that it is gated is not evidence that it is.
+
+<h4>Transport notes</h4>
+
+- **One HTML fallback exists, for `fetchChapterPages` only.** `api.asurascans.com` is a bare
+  unauthenticated subdomain — the first thing an operator firewalls — and with no pages the
+  provider is worthless, whereas search and info merely degrade. The same page list is
+  server-rendered into the chapter page's single `ChapterReader` `<astro-island>` and cannot be
+  disabled without breaking the site. Both paths apply the lock check and both are covered by the
+  offline suite. There is deliberately **no** fallback for search or info: the HTML there carries
+  nothing the API does not, so a second unexercised path would be pure liability.
+- **All three `asurascans` hosts share a User-Agent deny-list.** `Python-urllib/3.14` gets 403 from
+  `api.`, `cdn.` and the HTML host, while an absent UA, `Consumet/1.0`, `axios/1.6.0` and Chrome
+  all get 200. This is a library-UA deny-list, **not** the ComicK-style browser-UA trap, so the
+  shared explicit `USER_AGENT` this provider sends on every request is fine.
+- **`cdn.asurascans.com` has no hotlink protection.** Verified with a correct `Referer`, with none,
+  and with a hostile `https://evil.example.com/`: byte-identical 200s (`image/webp`, RIFF/WEBP
+  magic) every time. The `Referer` above is parity with sibling providers, not a requirement, and
+  no server-side proxy hop is needed for images. The `?v=` suffix is decorative — stripping it
+  returns byte-identical content. (Probed from a residential IP; re-confirm from your deployment
+  host before relying on it.)
 
 <p align="end">(<a href="https://github.com/consumet/extensions/blob/master/docs/guides/manga.md#">Back to Providers List</a>)</p>

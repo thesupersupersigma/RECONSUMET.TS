@@ -27,9 +27,13 @@ export const PROVIDERS_LIST = {
     new MANGA.MangaKakalot(),
     new MANGA.Mangapark(),
     new MANGA.MangaPill(),
-    new MANGA.Mangasee123(),
+    new MANGA.Mangasee123(), // reports itself as 'WeebCentral' — the class name is historical
     new MANGA.ComicK(),
-    new MANGA.FlameScans(),
+    new MANGA.FlameScans(), // reports itself as 'FlameComics'
+    // Rewritten against api.asurascans.com and verified end to end this wave. It was exported from
+    // ../providers/manga but never listed here, which made a working provider undiscoverable
+    // through the public PROVIDERS_LIST while unrepaired ones stayed visible.
+    new MANGA.AsuraScans(),
   ],
   BOOKS: [new BOOKS.Libgen()],
   COMICS: [new COMICS.GetComics()],
