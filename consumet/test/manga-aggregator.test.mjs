@@ -230,6 +230,46 @@ describe('MangaAggregator getChapters envelope', () => {
     assert.equal(out.chapters[2].unavailable.detail, 'https://mangaplus.example/x');
   });
 
+  test('an AsuraScans early-access chapter reads as locked, NOT as external', async () => {
+    // THE CROSS-AGENT SEAM. B1 typed reason 'locked'/'premium' with no producer; the AsuraScans
+    // rewrite then shipped isLocked/isPremium/unlockTime. Nothing joined them, and the join is not
+    // cosmetic: a locked AsuraScans chapter ALSO carries readable:false and an externalUrl (its own
+    // on-site reader URL), so the generic branch would label it 'external' — telling the user the
+    // chapter lives somewhere else, when in fact it is right here and unlocks on a timer. This is
+    // the exact shape the fixture captured live: HTTP 200, pages:null, is_locked:true.
+    const p = fake('Alpha', {
+      results: HIT,
+      chapters: [
+        {
+          id: 'series/chapter/30',
+          title: 'Chapter 30',
+          chapterNumber: '30',
+          isLocked: true,
+          isPremium: true,
+          unlockTime: '2026-08-15T00:05:48Z',
+          readable: false,
+          externalUrl: 'https://asurascans.com/comics/series/chapter/30',
+        },
+        // premium but NOT locked: the provider leaves it readable, so 'premium' is the operative
+        // gate only if it ever reaches us with no pages.
+        { id: 'series/chapter/31', title: 'Chapter 31', chapterNumber: '31', isPremium: true },
+        // a plain external stub still resolves to 'external' — the specific check must not swallow it
+        { id: 'series/chapter/32', title: 'Chapter 32', chapterNumber: '32', externalUrl: 'https://elsewhere.example/x' },
+      ],
+    });
+    const agg = new MangaAggregator({ providers: [p], metadata: meta() });
+    const { out } = await capture(() => agg.getChapters(30013));
+
+    assert.deepEqual(
+      out.chapters[0].unavailable,
+      { reason: 'locked', detail: '2026-08-15T00:05:48Z' },
+      'isLocked outranks readable:false/externalUrl, and the unlock time is the useful detail'
+    );
+    assert.equal(out.chapters[1].unavailable.reason, 'premium');
+    assert.equal(out.chapters[2].unavailable.reason, 'external');
+    assert.equal(out.chapters[2].unavailable.detail, 'https://elsewhere.example/x');
+  });
+
   test('absence of a readable flag is never read as unavailable', async () => {
     // Only MangaDex sets these. Every other provider omits them entirely, and inferring
     // unavailability from a missing field would mark that provider's whole catalogue unreadable.
@@ -338,11 +378,37 @@ describe('MangaAggregator getPages normalises what providers disagree about', ()
 });
 
 describe('MangaAggregator provider registry', () => {
-  test('registers exactly the three providers that work today', async () => {
+  test('registers exactly the providers that work today', async () => {
+    // Wave 2 added three, each re-verified end to end (search -> info -> chapters -> pages -> a
+    // real image GET with correct magic bytes) from the built dist/ before being registered.
+    // 'WeebCentral' is the class Mangasee123 pointed at its new host.
     assert.deepEqual(
       defaultProviderRegistry().map(r => r.parser.name).sort(),
-      ['MangaDex', 'MangaHere', 'MangaPill'],
-      'brmangas/mangahost/mangareader/readmanga are deleted; vyvymanga/mangakakalot are unrepaired'
+      ['AsuraScans', 'FlameComics', 'MangaDex', 'MangaHere', 'MangaPill', 'WeebCentral'],
+      'brmangas/mangahost/mangareader/readmanga are deleted; vyvymanga/mangakakalot/comick are unrepaired or unverified'
+    );
+  });
+
+  test('no registered provider claims a page-image Referer it does not need', async () => {
+    // MangaPill's CDN genuinely 403s without one. The three wave-2 CDNs were each fetched with the
+    // correct Referer, with none, and with a hostile one, and returned byte-identical 200s — so
+    // copying their providers' cosmetic headerForImage into traits would be a fabricated
+    // requirement. This pins the measurement, not the provider's own guess.
+    const traits = Object.fromEntries(defaultProviderRegistry().map(r => [r.parser.name, r.traits]));
+    for (const name of ['AsuraScans', 'FlameComics', 'WeebCentral'])
+      assert.deepEqual(traits[name].imageHeaders, {}, `${name} needs no Referer — verified live`);
+  });
+
+  test('search limits are what the provider can honour, not a round number', async () => {
+    const traits = Object.fromEntries(defaultProviderRegistry().map(r => [r.parser.name, r.traits]));
+    // WeebCentral's /search/data IGNORES `limit` and always returns 32 rows. A smaller trait would
+    // be a lie and would make anyone paging on it silently overlap pages.
+    assert.equal(traits.WeebCentral.searchLimit, 32);
+    // AsuraScans REFUSES a limit outside 1..50 (upstream returns 20 rows above 50 instead of
+    // clamping), so a registry entry above 50 would make every search throw.
+    assert.ok(
+      traits.AsuraScans.searchLimit >= 1 && traits.AsuraScans.searchLimit <= 50,
+      'AsuraScans refuses a limit outside 1..50'
     );
   });
 
@@ -359,11 +425,15 @@ describe('MangaAggregator provider registry', () => {
     assert.ok(traits.MangaDex.pageUrlCache.note.length > 10, 'the TTL must carry its justification');
   });
 
-  test('id shape is recorded, never assumed — MangaDex is UUIDs, the rest are slugs', async () => {
+  test('id shape is recorded, never assumed — four distinct shapes are in the registry', async () => {
     const traits = Object.fromEntries(defaultProviderRegistry().map(r => [r.parser.name, r.traits]));
     assert.equal(traits.MangaDex.idShape, 'uuid');
     assert.equal(traits.MangaHere.idShape, 'slug');
     assert.equal(traits.MangaPill.idShape, 'slug');
+    // Not 'slug': slug-sanitising a ULID mangles it, and rendering the numeric id "104" as a
+    // human-readable title is exactly the bug the field exists to prevent.
+    assert.equal(traits.WeebCentral.idShape, 'ulid');
+    assert.equal(traits.FlameComics.idShape, 'numeric');
   });
 
   test('image Referer is per provider — required on MangaPill, forbidden-ish on MangaDex', async () => {
@@ -378,7 +448,7 @@ describe('MangaAggregator provider registry', () => {
     // Gating fetchChapterPages would gate ONE call that internally fires ~500. The gate is an
     // axios request interceptor on the provider's own client, so it catches the per-page storm.
     const described = new MangaAggregator().describeProviders();
-    assert.equal(described.length, 3);
+    assert.equal(described.length, 6);
     for (const d of described) assert.equal(d.rateGated, true, `${d.name} is not rate gated`);
     assert.deepEqual(described.find(d => d.name === 'MangaDex').langs, ['en']);
   });

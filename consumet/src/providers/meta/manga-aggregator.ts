@@ -6,6 +6,15 @@ import { graphqlErrorsSummary, safeErrorString } from '../../utils/cf-solver';
 import MangaDex from '../manga/mangadex';
 import MangaHere from '../manga/mangahere';
 import MangaPill from '../manga/mangapill';
+// Rewritten this wave and verified end to end (search -> info -> chapters -> pages -> real image
+// bytes) before being registered here. `Mangasee123` is the class name only — the site it scrapes
+// is now weebcentral.com and it reports itself as 'WeebCentral'.
+import AsuraScans from '../manga/asurascans';
+import FlameScans from '../manga/flamescans';
+import Mangasee123 from '../manga/mangasee123';
+// B2's metadata layer. Imported for its FACTORY only — ./manga-metadata imports nothing but types
+// back from this file, so the emitted CommonJS has a single require() edge and no cycle.
+import { createMangaMetadataLayer } from './manga-metadata';
 
 const ANILIST_GRAPHQL = 'https://graphql.anilist.co';
 
@@ -100,9 +109,11 @@ export interface IMangaMapping {
  *   'premium'   — AsuraScans `is_premium`
  * All four fail SILENTLY upstream (200 + empty list), which is why they need to be modelled at all.
  *
- * 'external' IS populated — MangaDex surfaces `readable: false` + `externalUrl`, and
- * {@link chapterUnavailability} reads them. The other three are still typed-only, waiting on
- * ComicK/AsuraScans to expose the equivalent flags.
+ * 'external', 'locked' and 'premium' are all POPULATED now: MangaDex surfaces `readable: false` +
+ * `externalUrl`, AsuraScans surfaces `isLocked`/`isPremium`/`unlockTime`, and
+ * {@link chapterUnavailability} reads both sets — specific reasons first, since AsuraScans sets
+ * the generic flags too. 'no-images' remains typed-only; ComicK is not in the default registry and
+ * exposes no equivalent flag.
  */
 export interface IChapterUnavailable {
   reason: 'external' | 'no-images' | 'locked' | 'premium';
@@ -214,21 +225,32 @@ export interface IMangaMeta {
 }
 
 /**
- * TODO(B2): the metadata layer. B1 ships {@link AniListMangaMetadataResolver} — AniList only,
- * titles + the fields B3 will need — and nothing else. B2 supplies a resolver that ALSO consults
- * MangaDex `attributes.links` and MAL-Sync. Injected, so B2 replaces it without touching this file.
+ * The metadata layer. B1 shipped {@link AniListMangaMetadataResolver} — AniList only, titles plus
+ * the fields B3 needs — as the default.
+ *
+ * B2 LANDED: the default is now `VerifiedMangaMetadataResolver` from ./manga-metadata, which
+ * DECORATES the AniList one (AniList stays canonical) and cross-references MangaDex by
+ * `attributes.links.al` to fill holes: alt titles for provider search reach, `idMal` when AniList
+ * has none, `startYear` when AniList has none. It never overwrites what AniList stated.
  */
 export interface IMangaMetadataResolver {
   resolve(anilistId: string | number): Promise<IMangaMeta>;
 }
 
 /**
- * TODO(B2): an id bridge — the thing that turns a fuzzy title match into an 'exact-id' one.
- * Two are planned:
- *   * `mangadex-links.al` — GET /manga?...&includes[]= then compare `attributes.links.al`.
- *   * `malsync`           — GET api.malsync.moe/mal/manga/<idMal>, which names provider ids outright.
+ * An id bridge — the thing that turns a fuzzy title match into an 'exact-id' one.
  * `lookup` returns the provider-specific id, or null when the bridge has nothing to say.
- * DISPATCH IS ALREADY WIRED (see rankedFor) — B2 only has to write the object.
+ *
+ * B2 LANDED both planned bridges (see ./manga-metadata), registered by default in this order:
+ *   * `mangadex-links.al` — MangaDex asserts the AniList id ON the record, so the match is an id
+ *     equality. Also separates "(Official Colored)" re-releases for free: verified live, only the
+ *     base One Piece record carries `links.al`.
+ *   * `malsync` — GET api.malsync.moe/mal/manga/<idMal>, which names provider ids outright.
+ *     Covers MangaDex, MangaHere (via MangaFox) and MangaKakalot (via MangaNato); notably NOT
+ *     MangaPill, which therefore has title matching as its only path.
+ *
+ * THE INVARIANT THAT KEEPS DEFAULT REGISTRATION FREE: a bridge that cannot name the id space of
+ * the provider it was handed returns null WITHOUT issuing any upstream request.
  */
 export interface IMangaIdBridge {
   readonly name: string;
@@ -265,9 +287,12 @@ export type LangModel =
   | 'in-chapter-id' // MangaPark: the language is a segment of the chapter id
   | 'none'; // MangaHere / MangaPill: single-language site, no language concept at all
 
-/** Shape of a provider id. Recorded, never assumed — MangaDex ids are v4 UUIDs, everything else
- *  uses path slugs, and code that string-matches a slug shape breaks on MangaDex. */
-export type IdShape = 'uuid' | 'slug';
+/** Shape of a provider id. Recorded, never assumed — code that string-matches a slug shape breaks
+ *  on MangaDex. Four shapes are in the registry today: v4 UUIDs (MangaDex), path slugs (most),
+ *  26-char ULIDs (WeebCentral) and bare integers (FlameComics). 'ulid' and 'numeric' are NOT
+ *  'slug': a caller that sanitises a slug (lowercasing, stripping non-`[a-z0-9-]`) would mangle a
+ *  ULID, and one that assumes a slug is human-readable will render "104" as a title. */
+export type IdShape = 'uuid' | 'slug' | 'ulid' | 'numeric';
 
 export interface IMangaProviderTraits {
   idShape: IdShape;
@@ -321,11 +346,24 @@ export const DEFAULT_TRAITS: IMangaProviderTraits = {
 // ---------------------------------------------------------------------------------------------
 // THE WORKING SET.
 //
-// MangaDex, MangaHere and MangaPill are the three manga providers confirmed working. The other
-// providers in ../manga are either being repaired (VyvyManga, MangaKakalot) or deleted
-// (brmangas, mangahost, mangareader, readmanga) in this same wave, so this file imports NONE of
-// them: a provider that ships broken must not be able to break the aggregator's module graph.
-// Adding one later is a single entry in this array plus its traits.
+// SIX providers now, up from three. MangaDex, MangaHere and MangaPill were the wave-1 working set;
+// AsuraScans, FlameComics and WeebCentral were rewritten against their current hosts in wave 2 and
+// are registered here only because each was re-verified END TO END from the built dist/ before the
+// entry was written — search -> fetchMangaInfo -> chapter list -> fetchChapterPages -> an actual
+// GET of page 1 confirming magic bytes and a plausible length. A provider whose pipeline could not
+// be walked in full does NOT get an entry; a green unit suite is not evidence that a host answers.
+//
+// Providers still absent are absent on purpose: VyvyManga and MangaKakalot are unrepaired, ComicK
+// is unverified (its API 301s), and brmangas/mangahost/mangareader/readmanga were deleted. This
+// file imports none of them — a provider that ships broken must not break the module graph.
+//
+// EVERY `imageHeaders` BELOW IS A MEASUREMENT, NOT A COPY OF WHAT THE PROVIDER EMITS. The three
+// new CDNs were each fetched three ways — correct Referer, no Referer, and a hostile
+// `https://evil.example.com/` — and returned byte-identical 200s every time, so all three take
+// `{}`. AsuraScans and WeebCentral still stamp a Referer on their own page objects for parity with
+// their siblings; that is cosmetic, and these traits are what a caller should actually believe.
+// (Contrast MangaPill, whose CDN really does 403 without one.) Caveat inherited from the wave:
+// every such probe ran from a RESIDENTIAL IP. See the note on each entry.
 // ---------------------------------------------------------------------------------------------
 export const defaultProviderRegistry = (): { parser: MangaParser; traits: IMangaProviderTraits }[] => [
   {
@@ -392,6 +430,86 @@ export const defaultProviderRegistry = (): { parser: MangaParser; traits: IManga
       },
       // Empirically required: the CDN answers 403 with no Referer and 200 with this one.
       imageHeaders: { Referer: 'https://mangapill.com/' },
+    },
+  },
+  {
+    parser: new AsuraScans(),
+    traits: {
+      // Bare series slug ('solo-leveling'). NOTE the chapter id is '<slug>/chapter/<number>' and
+      // therefore CONTAINS SLASHES — anything putting a chapter id in a URL path rather than a
+      // query parameter must encode it.
+      idShape: 'slug',
+      langModel: 'none',
+      langs: ['en'],
+      requestsPerSecond: 4, // a JSON API, but undocumented and unmeasured — stay polite
+      // The provider REFUSES a limit outside 1..50 (upstream silently returns 20 rows above 50
+      // rather than clamping), so this must stay in range.
+      searchLimit: 20,
+      // fetchMangaInfo is 2 parallel requests, fetchChapterPages is 1 (+1 if the HTML fallback
+      // engages). These are circuit breakers against a loop, not throttles.
+      budgets: { chapterList: 8, chapterPages: 8, search: 8 },
+      pageUrlCache: {
+        ttlSeconds: 3600,
+        immutable: false,
+        note: 'cdn.asurascans.com paths are content-addressed and the ?v= suffix is decorative (stripping it returns byte-identical content); not marked immutable because re-uploads were never observed over time',
+      },
+      // Verified with, without, and with a hostile Referer: byte-identical 200s, image/webp,
+      // RIFF/WEBP magic. No hotlink protection.
+      imageHeaders: {},
+    },
+  },
+  {
+    parser: new FlameScans(),
+    traits: {
+      // A bare integer series_id ('104'), NOT a slug — it is not human-readable and must not be
+      // rendered as a title. Chapter ids are the composite '<series_id>/<token>'.
+      idShape: 'numeric',
+      langModel: 'none',
+      langs: ['en'],
+      requestsPerSecond: 4,
+      searchLimit: 20, // honoured: search() filters the catalogue client-side and truncates
+      // search pulls the WHOLE catalogue in one request (the site ignores its own query string);
+      // the /_next/data fast path can cost one extra request when it re-learns a rotated buildId.
+      budgets: { chapterList: 8, chapterPages: 8, search: 8 },
+      pageUrlCache: {
+        ttlSeconds: 3600,
+        immutable: false,
+        note: 'cdn.flamecomics.xyz/uploads/... is a plain content path with no query string or token; long-term stability not observed, so not immutable',
+      },
+      // Verified three ways: byte-identical 200s, image/jpeg, JPEG magic, 808,044 bytes matching
+      // the size the metadata declares. No hotlink protection. The provider deliberately emits no
+      // headerForImage either, so this agrees with it.
+      imageHeaders: {},
+    },
+  },
+  {
+    parser: new Mangasee123(),
+    traits: {
+      // 26-char ULIDs, e.g. 01J76XYA2AFH8MNBG4FRCM5JMV. Deliberately NOT 'slug': every legacy
+      // mangasee123 slug id is dead and is rejected pre-flight, so any cached id must be
+      // re-resolved through search().
+      idShape: 'ulid',
+      langModel: 'none',
+      langs: ['en'],
+      requestsPerSecond: 3, // behind Cloudflare, and it already 403s bot UAs — the most cautious
+      // 32, and NOT caller-settable: the /search/data endpoint IGNORES `limit` and always returns
+      // 32 rows (measured at 5/10/24/32/50/100/200). Claiming 20 here would make the trait a lie
+      // and would silently overlap pages for anyone paging on it.
+      searchLimit: 32,
+      // fetchMangaInfo is 2 requests (the series page embeds only ~9 chapters, so the full list
+      // must come from /full-chapter-list); fetchChapterPages is 1.
+      budgets: { chapterList: 8, chapterPages: 8, search: 8 },
+      pageUrlCache: {
+        ttlSeconds: 3600,
+        immutable: false,
+        note: 'per-series CDN host (official.lowee.us / scans-hot.planeptune.us) with a plain path and no token; host varies per series so URLs are read, never constructed',
+      },
+      // Verified three ways on official.lowee.us: byte-identical 200s. No hotlink protection.
+      // GOTCHA for any caller that picks a decoder or cache key from the URL or Content-Type:
+      // page URLs end in .png AND the CDN answers `Content-Type: image/png`, but the BYTES ARE
+      // JPEG (ffd8ffe0/JFIF). Confirmed again here at 526,454 bytes. Covers are honest; only page
+      // images lie.
+      imageHeaders: {},
     },
   },
 ];
@@ -562,13 +680,32 @@ const chapterNumberOf = (raw: any): string | undefined => {
  * from real chapters and `getPages` throws on them: live, Chainsaw Man's NEWEST chapter is such a
  * stub, so the aggregator's most obvious call threw on a top-10 title.
  *
+ * AsuraScans now supplies the other half. It sets `isLocked`/`isPremium`/`unlockTime` on an
+ * early-access chapter, which is why ORDER MATTERS HERE: a locked AsuraScans chapter also carries
+ * `readable: false` AND an `externalUrl` (its own on-site reader URL), so checking `external` first
+ * would label every early-access chapter 'external' — i.e. "hosted somewhere else", which is the
+ * wrong thing to tell a user about a chapter that is on this very site and unlocks on a timer. The
+ * specific reasons are therefore tested before the general one, and `unlockTime` is preferred as
+ * the detail because "unlocks 2026-08-15T00:05Z" is actionable where a URL that 200s into a
+ * paywall is not.
+ *
  * Read defensively — these are optional fields on `[x: string]: unknown` provider models, so a
  * provider that never sets them simply yields `undefined` and nothing changes for it.
  */
 const chapterUnavailability = (raw: any): IChapterUnavailable | undefined => {
   const externalUrl = asText(raw?.externalUrl);
-  // `readable === false` is the explicit signal; only MangaDex sets it today. Anything else
-  // (undefined, true) is NOT treated as unavailable — absence of evidence is not evidence.
+  const unlockTime = asText(raw?.unlockTime);
+  // MOST SPECIFIC FIRST. `isLocked` outranks `isPremium` because AsuraScans sets both together on
+  // an early-access chapter and "locked" is the reason the pages are missing; "premium" is how it
+  // is monetised. A chapter that is premium but NOT locked is left alone by the provider (it is
+  // readable), so reaching the second branch means premium is the operative gate.
+  if (raw?.isLocked === true)
+    return { reason: 'locked', ...(unlockTime ?? externalUrl ? { detail: unlockTime ?? externalUrl } : {}) };
+  if (raw?.isPremium === true)
+    return { reason: 'premium', ...(unlockTime ?? externalUrl ? { detail: unlockTime ?? externalUrl } : {}) };
+  // `readable === false` is the explicit generic signal; MangaDex sets it for off-site stubs.
+  // Anything else (undefined, true) is NOT treated as unavailable — absence of evidence is not
+  // evidence.
   if (raw?.readable === false || externalUrl !== undefined)
     return {
       reason: 'external',
@@ -653,9 +790,9 @@ export class AniListMangaMetadataResolver implements IMangaMetadataResolver {
 export interface IMangaAggregatorOptions {
   /** Registry entries, or bare parsers (which get {@link DEFAULT_TRAITS}). Default: the working set. */
   providers?: (MangaParser | { parser: MangaParser; traits?: Partial<IMangaProviderTraits> })[];
-  /** TODO(B2) — default is AniList-only. */
+  /** Default: B2's AniList-primary, MangaDex-verified resolver (see ./manga-metadata). */
   metadata?: IMangaMetadataResolver;
-  /** TODO(B2) — default is none, so nothing is ever labelled 'exact-id'. */
+  /** Default: B2's `[mangadex-links.al, malsync]`, strongest first. Pass `[]` to disable bridging. */
   bridges?: IMangaIdBridge[];
   /** TODO(B3) — default promotes nothing, so everything title-matched is 'unverified'. */
   classifier?: IMangaMatchClassifier;
@@ -683,11 +820,12 @@ export interface IMangaAggregatorOptions {
  * WHERE THE ANIME VERSION'S TIER-2 *VERIFICATION* WOULD GO, THERE IS NOTHING. `verifyMatch` there
  * rejects on (a) a leaked AniList id, (b) a season-ordinal contradiction, (c) an episode-count
  * backstop. Manga has no seasons, so (b) does not exist; AniList reports `chapters: null` for
- * every RELEASING series, so (c) has no manga analogue and must not be faked. (a) is real but
- * needs an id bridge — that is B2, and the dispatch for it is already wired in `rankedFor`.
- * Until then every title match is labelled 'unverified' and the label travels WITH the mapping,
- * which is exactly why manga-routes.mjs puts `matchConfidence` on MangaMapping and the anime
- * route has no such field.
+ * every RELEASING series, so (c) has no manga analogue and must not be faked. (a) is answered by
+ * B2's id bridges, dispatched in `rankedFor` and registered by default — but they only cover the
+ * providers MangaDex/MAL-Sync actually name, so a title match on (say) MangaPill is still just a
+ * title match. It is labelled 'unverified' and the label travels WITH the mapping, which is
+ * exactly why manga-routes.mjs puts `matchConfidence` on MangaMapping and the anime route has no
+ * such field.
  *
  * CONCURRENCY. Providers fan out with Promise.all + a per-provider catch, exactly as
  * ./aggregator.ts does: one dead provider degrades to "no candidates from this provider" and is
@@ -717,8 +855,18 @@ class MangaAggregator {
       installRateGate(parser, gate);
       return { parser, traits, gate };
     });
-    this.metadata = options.metadata ?? new AniListMangaMetadataResolver(this.client);
-    this.bridges = options.bridges ?? [];
+    // B2's metadata layer, built over THIS aggregator's axios client so that a test which swaps
+    // `agg.client.defaults.adapter` for a fake also captures the MangaDex and MAL-Sync traffic.
+    // The resolver DECORATES B1's AniList one rather than replacing it, so AniList stays the
+    // canonical id space and its rate-limit detection is unchanged; MangaDex only fills holes.
+    // Both bridges and the resolver share one set of caches, so a whole /manga/info call costs at
+    // most one MAL-Sync GET and one or two MangaDex GETs no matter how many providers fan out.
+    const layer = createMangaMetadataLayer(this.client, new AniListMangaMetadataResolver(this.client));
+    this.metadata = options.metadata ?? layer.metadata;
+    // Registering bridges by default is only safe because each one returns null WITHOUT issuing an
+    // upstream request when it cannot name the given provider's id space — so a registry of
+    // duck-typed fakes (every offline suite) pays nothing and behaves exactly as before.
+    this.bridges = options.bridges ?? layer.bridges;
     this.classifier = options.classifier ?? unverifiedClassifier;
     this.imageProxy = options.imageProxy ?? (rawImg => rawImg);
   }
@@ -853,7 +1001,9 @@ class MangaAggregator {
         const name = entry.parser.name;
         const key = name.toLowerCase();
 
-        // 1) id bridges — TODO(B2) supplies these; the dispatch is live so B2 is purely additive.
+        // 1) id bridges — B2's, registered by default. Each returns null without any upstream
+        //    request for a provider whose id space it cannot name, so this loop is free for the
+        //    providers it does not cover.
         for (const bridge of this.bridges) {
           try {
             const exactId = await bridge.lookup(meta, name);

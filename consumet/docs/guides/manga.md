@@ -32,10 +32,20 @@ const mangaProvider = MANGA.<providerName>();
 ## Manga Providers List
 This list is in alphabetical order. (except the sub bullet points)
 
+- [AsuraScans](../providers/asurascans.md) — rewritten against `api.asurascans.com`; ids are bare
+  slugs now, not `series/<slug>-<hash>`.
 - [MangaDex](../providers/mangadex.md)
 - [MangaHere](../providers/mangahere.md)
 - [MangaKakalot](../providers/mangakakalot.md)
-- [Mangasee123](../providers/mangasee123.md)
+- [MangaPill](../providers/mangapill.md)
+- [Mangasee123](../providers/mangasee123.md) — scrapes **weebcentral.com** and reports itself as
+  `WeebCentral`; the class name is historical (`mangasee123.com` is a parked domain). All ids are
+  ULIDs now; legacy slug ids are rejected.
+
+> Docs also exist for [MangaPark](../providers/mangapark.md) and
+> [VyvyManga](../providers/vyvymanga.md), but neither provider has been re-verified against its
+> current host and neither is in `MangaAggregator`'s default registry. FlameScans (now
+> **FlameComics**, `flamecomics.xyz`) works and is registered but has no doc page yet.
 
 
 <p align="end">(<a href="https://github.com/consumet/extensions/blob/master/docs">back to table of contents</a>)</p>
