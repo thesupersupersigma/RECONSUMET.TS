@@ -15,6 +15,9 @@ import Mangasee123 from '../manga/mangasee123';
 // B2's metadata layer. Imported for its FACTORY only — ./manga-metadata imports nothing but types
 // back from this file, so the emitted CommonJS has a single require() edge and no cycle.
 import { createMangaMetadataLayer } from './manga-metadata';
+// B3's confidence classifier, imported the same way and for the same reason: ./manga-classifier
+// imports only TYPES back from this file, so there is one require() edge and no cycle.
+import { createMangaMatchClassifier } from './manga-classifier';
 
 const ANILIST_GRAPHQL = 'https://graphql.anilist.co';
 
@@ -51,7 +54,10 @@ const ANILIST_GRAPHQL = 'https://graphql.anilist.co';
 
 // --- matching tunables (deliberately inherited from ./aggregator.ts so the two behave alike) ---
 const TITLE_FLOOR = 0.35; // a candidate must clear this on title alone — metadata never rescues a bad title
-const MAX_CANDIDATES = 3; // top-N kept per provider, for the B3 verification pass to probe
+// top-N kept per provider. All of them are classified, then re-sorted confidence-first — which is
+// why keeping more than one matters: a provider's best-SPELLED hit is regularly a re-release or a
+// novelisation, and the corroborated candidate is the second or third row.
+const MAX_CANDIDATES = 3;
 
 /** Fallback translated language when a caller does not ask for one. Matches /manga/read's default. */
 export const DEFAULT_LANG = 'en';
@@ -71,10 +77,28 @@ export const DEFAULT_LANG = 'en';
  *                  equal to the requested AniList id, or MAL-Sync via idMal).
  *   'metadata'   — title similarity PLUS start-year / countryOfOrigin / format agreement.
  *   'unverified' — title similarity alone. Served, but LABELLED, never silently.
- * B1 only ever emits 'unverified' unless an id bridge is injected (see {@link IMangaIdBridge});
- * B3 populates the middle tier.
+ *
+ * ALL THREE TIERS ARE LIVE. 'exact-id' comes from the id bridges in ./manga-metadata.ts,
+ * 'metadata' from `MetadataMatchClassifier` in ./manga-classifier.ts, and 'unverified' is what
+ * anything else honestly is. There is NO fourth, count-based tier: see the note on
+ * EPISODE_COUNT_TOLERANCE in the header and `describeMangaMatchClassifier().refusals`.
  */
 export type MangaMatchConfidence = 'exact-id' | 'metadata' | 'unverified';
+
+/**
+ * Sort key for {@link MangaMatchConfidence}, strongest first. Exported because ordering by
+ * confidence and only THEN by title score is what stops a colour re-release or a novelisation with
+ * a marginally better string match from being handed back as a provider's best mapping.
+ */
+export const MANGA_CONFIDENCE_RANK: Readonly<Record<MangaMatchConfidence, number>> = {
+  'exact-id': 0,
+  metadata: 1,
+  unverified: 2,
+};
+
+/** Strongest confidence first, then best title score. The ordering used everywhere mappings rank. */
+export const byMangaConfidenceThenScore = (a: IMangaMapping, b: IMangaMapping): number =>
+  MANGA_CONFIDENCE_RANK[a.matchConfidence] - MANGA_CONFIDENCE_RANK[b.matchConfidence] || b.score - a.score;
 
 /** What produced an 'exact-id' match. Open-ended on purpose — B2 may add bridges. */
 export type MangaMatchVia = 'mangadex-links.al' | 'malsync' | (string & {});
@@ -130,7 +154,10 @@ export interface IAggregatedMangaChapter {
    */
   chapterNumber?: string;
   volumeNumber?: string; // string for the same reason ('TBD', 'Extra')
-  pages?: number; // page COUNT (a real number); only MangaDex reports it up front
+  // page COUNT (a real number). Reported up front by MangaDex and AsuraScans only — measured live
+  // 2026-08-14: MangaDex 425/425 chapters and AsuraScans 201/201 carry a non-zero count, while
+  // FlameComics and WeebCentral carry none at all. Absent elsewhere, so never rely on it.
+  pages?: number;
   /**
    * Translated language of THIS chapter. Real per-chapter data on MangaDex; stamped from the
    * provider's declared single language on English-only providers (MangaHere, MangaPill), where
@@ -154,7 +181,8 @@ export interface IAggregatedMangaPage {
   page: number;
   /** Whatever number the provider itself claimed, kept for diagnosis. Never used for ordering. */
   providerPage?: number;
-  /** Client-facing image URL. Identity unless an `imageProxy` is injected — see B4 TODO below. */
+  /** Client-facing image URL. Identity unless an `imageProxy` is injected; the API layer injects
+   *  one, so over HTTP this is a `/manga/image?url=…&ref=…` link. See {@link IMangaAggregatorOptions.imageProxy}. */
   img: string;
   /** The upstream URL, unproxied. Mirrors /watch's `rawUrl`. */
   rawImg: string;
@@ -201,11 +229,13 @@ export interface IMangaPagesResult {
 }
 
 // =============================================================================================
-// SEAMS FOR B2 (metadata layer) AND B3 (confidence tiers)
+// THE INJECTION SEAMS: metadata layer (B2) and confidence classifier (B3)
 //
-// Typed here, injected through the constructor, and DISPATCHED below — but with no
-// implementations, so B2/B3 are additions rather than rewrites. Nothing in this file reaches
-// api/src, and nothing in api/src needs to change when they land.
+// Typed here, injected through the constructor, and DISPATCHED below. BOTH ARE NOW IMPLEMENTED and
+// registered by default — the metadata layer in ./manga-metadata.ts, the classifier in
+// ./manga-classifier.ts — and both remain fully replaceable through {@link IMangaAggregatorOptions},
+// which is what lets the offline suites drive real wiring with fakes. Nothing in this file reaches
+// api/src, and nothing in api/src had to change when they landed.
 // =============================================================================================
 
 /** AniList manga metadata used for matching. The manga analogue of AniMeta. */
@@ -259,10 +289,20 @@ export interface IMangaIdBridge {
 }
 
 /**
- * TODO(B3): the confidence classifier. Given a title-matched candidate, decide whether the
- * metadata agrees strongly enough to promote 'unverified' → 'metadata'. B1 injects
- * {@link unverifiedClassifier}, which promotes nothing, so every non-bridged mapping is honestly
- * labelled 'unverified'. 'exact-id' is decided before this runs (a bridge outranks any heuristic).
+ * The confidence classifier. Given a title-matched candidate, decide whether the metadata agrees
+ * strongly enough to promote 'unverified' → 'metadata'. Runs PER CANDIDATE, and 'exact-id' is
+ * decided before it ever runs (a bridge outranks any heuristic and skips the search entirely).
+ *
+ * B3 LANDED: the default is now `MetadataMatchClassifier` from ./manga-classifier — exact
+ * provider-primary-title equality plus a corroborating start-year / countryOfOrigin / format
+ * field, with contradictions as vetoes. It reads NO chapter or volume count; that refusal is the
+ * whole point and is argued at length in that file's header.
+ *
+ * `raw` is the untouched provider search result, so alt titles, year and type are all reachable.
+ *
+ * THE SAFETY PROPERTY, which is deliberate and is mutation-tested: a classifier that THROWS is
+ * caught by {@link MangaAggregator} and the candidate stays 'unverified'. A bug in a heuristic can
+ * therefore never manufacture confidence — it can only fail to grant it.
  */
 export interface IMangaMatchClassifier {
   classify(
@@ -271,7 +311,11 @@ export interface IMangaMatchClassifier {
   ): MangaMatchConfidence | Promise<MangaMatchConfidence>;
 }
 
-/** B1 default: never promotes. Replaced wholesale by B3. */
+/**
+ * Never promotes. Was B1's default and is no longer installed by default, but it stays exported
+ * because it is the one-line way for a caller to opt out of tier 2 entirely — pass
+ * `classifier: unverifiedClassifier` and every non-bridged mapping is labelled 'unverified' again.
+ */
 export const unverifiedClassifier: IMangaMatchClassifier = { classify: () => 'unverified' };
 
 // =============================================================================================
@@ -502,7 +546,7 @@ export const defaultProviderRegistry = (): { parser: MangaParser; traits: IManga
       pageUrlCache: {
         ttlSeconds: 3600,
         immutable: false,
-        note: 'per-series CDN host (official.lowee.us / scans-hot.planeptune.us) with a plain path and no token; host varies per series so URLs are read, never constructed',
+        note: 'per-series CDN host (official.lowee.us / hot.planeptune.us) with a plain path and no token; host varies per series so URLs are read, never constructed',
       },
       // Verified three ways on official.lowee.us: byte-identical 200s. No hotlink protection.
       // GOTCHA for any caller that picks a decoder or cache key from the URL or Content-Type:
@@ -539,8 +583,11 @@ export const defaultProviderRegistry = (): { parser: MangaParser; traits: IManga
  * calls to the same provider cross-charge each other. That is deliberately conservative: the
  * budget is a circuit breaker against a runaway chapter, not an accounting system.
  *
- * TODO(B4): the POLICY (what the numbers are per deployment, whether 429 triggers backoff, and
- * whether the budget is per-request or per-API-key) belongs with the API layer. This is the seam.
+ * STILL OPEN (B4 shipped without it, deliberately): the POLICY — what the numbers are per
+ * deployment, whether 429 triggers backoff, and whether the budget is per-request or per-API-key —
+ * belongs with the API layer. B4 wired the routes and verified the gate is genuinely attached to
+ * every registered provider (describeProviders().rateGated), but left the numbers where they are.
+ * This is the seam.
  */
 export class RateGate {
   private readonly minIntervalMs: number;
@@ -794,12 +841,18 @@ export interface IMangaAggregatorOptions {
   metadata?: IMangaMetadataResolver;
   /** Default: B2's `[mangadex-links.al, malsync]`, strongest first. Pass `[]` to disable bridging. */
   bridges?: IMangaIdBridge[];
-  /** TODO(B3) — default promotes nothing, so everything title-matched is 'unverified'. */
+  /**
+   * Default: B3's `MetadataMatchClassifier` (see ./manga-classifier). Pass
+   * {@link unverifiedClassifier} to disable tier 2 and label every non-bridged mapping
+   * 'unverified'.
+   */
   classifier?: IMangaMatchClassifier;
   /**
-   * TODO(B4) — turns a raw upstream image URL into the client-facing one. The API layer injects a
-   * builder for `/manga/image?url=…&ref=…`; the aggregator has no business knowing its own origin,
-   * so the default is identity and `img === rawImg`.
+   * Turns a raw upstream image URL into the client-facing one. The API layer injects a builder for
+   * `/manga/image?url=…&ref=…` (see `createMangaAggregator` in api/src/manga-routes.mjs); the
+   * aggregator has no business knowing its own origin, so the default is identity and
+   * `img === rawImg`. The referer passed here is the PER-PAGE one where a provider supplies it,
+   * which is why the proxy link is built in this seam and not re-derived by the caller afterwards.
    */
   imageProxy?: (rawImg: string, referer?: string) => string;
 }
@@ -817,14 +870,21 @@ export interface IMangaAggregatorOptions {
  *     and returns the first that yields chapters, falling through with a `reason` rather than
  *     serving nothing silently.
  *
- * WHERE THE ANIME VERSION'S TIER-2 *VERIFICATION* WOULD GO, THERE IS NOTHING. `verifyMatch` there
- * rejects on (a) a leaked AniList id, (b) a season-ordinal contradiction, (c) an episode-count
- * backstop. Manga has no seasons, so (b) does not exist; AniList reports `chapters: null` for
- * every RELEASING series, so (c) has no manga analogue and must not be faked. (a) is answered by
- * B2's id bridges, dispatched in `rankedFor` and registered by default — but they only cover the
- * providers MangaDex/MAL-Sync actually name, so a title match on (say) MangaPill is still just a
- * title match. It is labelled 'unverified' and the label travels WITH the mapping, which is
- * exactly why manga-routes.mjs puts `matchConfidence` on MangaMapping and the anime route has no
+ * WHERE THE ANIME VERSION'S TIER-2 *VERIFICATION* WOULD GO, THERE ARE CONFIDENCE TIERS INSTEAD.
+ * `verifyMatch` there rejects on (a) a leaked AniList id, (b) a season-ordinal contradiction,
+ * (c) an episode-count backstop. Manga has no seasons, so (b) does not exist; AniList reports
+ * `chapters: null` for every RELEASING series, so (c) HAS NO MANGA ANALOGUE and is not faked
+ * anywhere in this file or its two neighbours. (a) is answered by B2's id bridges, dispatched in
+ * `rankedFor` and registered by default.
+ *
+ * What replaces the missing backstop is honesty rather than a substitute check: B3's
+ * `MetadataMatchClassifier` (./manga-classifier) promotes a candidate to 'metadata' only when the
+ * provider's own primary title matches EXACTLY and it publishes a corroborating start year or
+ * origin, and anything else stays 'unverified'. Two of the six registered providers (MangaHere,
+ * MangaPill) publish no non-title field in a search result at all, so tier 2 is structurally out of
+ * reach for them and they are 'exact-id' via a bridge or 'unverified' — that limit is documented in
+ * `MANGA_CLASSIFIER_SIGNAL_COVERAGE`, not papered over. The label travels WITH the mapping, which
+ * is exactly why manga-routes.mjs puts `matchConfidence` on MangaMapping and the anime route has no
  * such field.
  *
  * CONCURRENCY. Providers fan out with Promise.all + a per-provider catch, exactly as
@@ -867,7 +927,11 @@ class MangaAggregator {
     // upstream request when it cannot name the given provider's id space — so a registry of
     // duck-typed fakes (every offline suite) pays nothing and behaves exactly as before.
     this.bridges = options.bridges ?? layer.bridges;
-    this.classifier = options.classifier ?? unverifiedClassifier;
+    // B3's classifier. Registering it by default is safe for the same structural reason the bridges
+    // are: it issues NO requests and reads only fields the provider already put in its own search
+    // result, so a registry of duck-typed fakes pays nothing — and a fake that states no year and
+    // no type simply cannot be promoted, which is why every pre-B3 offline expectation still holds.
+    this.classifier = options.classifier ?? createMangaMatchClassifier();
     this.imageProxy = options.imageProxy ?? (rawImg => rawImg);
   }
 
@@ -923,9 +987,11 @@ class MangaAggregator {
   };
 
   /**
-   * TIER 1: top-N title candidates for one provider. No re-ranking pass — the anime version's
-   * season/part/year/format adjustment has no manga analogue (see the header). The slot where a
-   * re-rank WOULD go is B3's classifier, which runs per candidate below.
+   * TIER 1: top-N title candidates for one provider, ranked by string similarity ALONE. The anime
+   * version's season/part adjustment has no manga analogue (see the header), and the year/format
+   * adjustment deliberately does not happen here — it happens in `rankedFor`, AFTER the classifier
+   * has turned those same fields into a confidence tier, so that one piece of evidence is not spent
+   * twice (once nudging a score, once granting a label).
    */
   private rankedMatches = async (
     entry: IMangaProviderEntry,
@@ -976,11 +1042,12 @@ class MangaAggregator {
    *
    * ORDER OF PRECEDENCE, strongest first:
    *   1. An id bridge naming the provider id outright → 'exact-id' (+ `via`). No search needed,
-   *      and no title fuzziness can override it. DISPATCH ONLY — B1 registers no bridges.
-   *   2. Title similarity, then the classifier's verdict ('metadata' or 'unverified'). B1's
-   *      classifier promotes nothing.
-   * A provider that throws degrades to "no candidates from this provider", logged with its real
-   * error — never a silent empty.
+   *      and no title fuzziness can override it. B2's two bridges are registered by default.
+   *   2. Title similarity, then the classifier's verdict ('metadata' or 'unverified'). B3's
+   *      classifier is registered by default and promotes only on corroborated evidence.
+   * Candidates are then re-sorted CONFIDENCE-FIRST, so an evidenced match outranks a better-spelled
+   * guess. A provider that throws degrades to "no candidates from this provider", logged with its
+   * real error — never a silent empty.
    */
   private rankedFor = async (
     anilistId: string | number
@@ -1042,7 +1109,20 @@ class MangaAggregator {
         for (const { mapping, raw } of candidates) {
           let confidence: MangaMatchConfidence = 'unverified';
           try {
-            confidence = await this.classifier.classify({ ...mapping, raw }, meta);
+            // CLAMPED, NOT TRUSTED. Only 'metadata' promotes: 'exact-id' means "an id bridge named
+            // this provider id outright" and is decided ABOVE, before the search is even issued, so
+            // a heuristic answering 'exact-id' would be claiming evidence that does not exist (and
+            // would emit a mapping with no `via`, which nothing downstream could explain). Anything
+            // else a classifier returns — a typo, undefined, a future tier this build has never
+            // heard of — lands on the honest label rather than being written through.
+            const verdict = await this.classifier.classify({ ...mapping, raw }, meta);
+            if (verdict === 'metadata') confidence = 'metadata';
+            else if (verdict !== 'unverified')
+              console.error(
+                `[manga-aggregator] match classifier returned ${JSON.stringify(verdict)} for ${name} ` +
+                  `candidate "${mapping.title}" — only 'metadata' may promote (an 'exact-id' is a bridge's ` +
+                  `answer, never a heuristic's); labelling 'unverified'`
+              );
           } catch (err) {
             // A broken classifier must degrade to the HONEST label, never to a confident one.
             console.error(
@@ -1052,19 +1132,35 @@ class MangaAggregator {
           }
           mappings.push({ ...mapping, matchConfidence: confidence });
         }
+        // CONFIDENCE OUTRANKS TITLE SCORE WITHIN A PROVIDER, and this is where a re-release stops
+        // beating the base record. `rankedMatches` ordered these by string similarity alone, which
+        // is precisely the signal that cannot separate "Solo Leveling" from "Solo Leveling
+        // (Volume)" (WeebCentral, both 2018, captured live) or "One Piece" from "One Piece
+        // (Official Colored)". Re-sorting here means `getMappings` hands back the best-EVIDENCED
+        // candidate rather than the best-SPELLED one, and `getChapters` tries them in that order.
+        // Array.prototype.sort is stable, so equal-confidence equal-score candidates keep the
+        // provider's own ordering.
+        mappings.sort(byMangaConfidenceThenScore);
         return [key, mappings] as const;
       })
     );
     return { meta, byProvider: new Map(entries) };
   };
 
-  /** Map an AniList manga id to the best match per provider (for /manga/info). Cheap — no chapter
-   *  fetches. Every mapping carries its own `matchConfidence`; see the class header for why. */
+  /**
+   * Map an AniList manga id to the best match per provider (for /manga/info). Cheap — no chapter
+   * fetches. Every mapping carries its own `matchConfidence`; see the class header for why.
+   *
+   * ORDERED BY CONFIDENCE FIRST, then title score. A title score of 1.0 is trivially reached by a
+   * novelisation or a colour edition whose name happens to be spelled exactly right, so scoring
+   * alone would put an unverified guess above a corroborated match — and a client that takes
+   * `mappings[0]` would then read the wrong series. See {@link byMangaConfidenceThenScore}.
+   */
   getMappings = async (anilistId: string | number): Promise<IMangaMapping[]> => {
     const { byProvider } = await this.rankedFor(anilistId);
     const best: IMangaMapping[] = [];
     for (const list of byProvider.values()) if (list.length) best.push(list[0]);
-    return best.sort((a, b) => b.score - a.score);
+    return best.sort(byMangaConfidenceThenScore);
   };
 
   /**
@@ -1081,8 +1177,10 @@ class MangaAggregator {
    * the three agree, but by coincidence rather than by contract. Sorting here would mean sorting
    * `chapterNumber`, which is deliberately a STRING carrying '100.5', 'Extra' and 'Oneshot': any
    * numeric sort silently reorders decimals and dumps the non-numeric ones somewhere arbitrary.
-   * TODO(B4): if the reader needs a guaranteed order, it belongs in the API layer where a
-   * "numeric where possible, stable otherwise" rule can be stated and tested explicitly.
+   * STILL OPEN, and B4 chose to leave it open: `/manga/chapters` returns this order verbatim
+   * rather than shipping a sort it could not state precisely. If the reader ever needs a
+   * guaranteed order it belongs in the API layer, where a "numeric where possible, stable
+   * otherwise" rule can be written down and tested explicitly.
    */
   getChapters = async (
     anilistId: string | number,
