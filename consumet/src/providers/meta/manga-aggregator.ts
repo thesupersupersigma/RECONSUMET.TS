@@ -213,7 +213,17 @@ export interface IMangaChaptersResult {
    *  requested language are SKIPPED rather than silently answering in another one. */
   lang?: string;
   chapters: IAggregatedMangaChapter[];
-  /** Present iff `provider` is null. Same role as getEpisodes()'s `reason`. */
+  /**
+   * ALWAYS present when `provider` is null — that is the whole payload of a no-match answer, and it
+   * is the same role getEpisodes()'s `reason` plays.
+   *
+   * ALSO present, since the servability policy landed, on the one DEGRADED success: a chapter list
+   * that was served even though not a single chapter in it is readable (see
+   * {@link MangaAggregator.getChapters}). It is prose for a human — a client that needs to branch
+   * reads `chapters.every(c => c.unavailable)`, which is the same fact in machine-readable form and
+   * has been on the chapter objects since `unavailable` was populated. It is NOT present on a
+   * normal success, so `reason == null` still means "nothing to explain".
+   */
   reason?: string;
 }
 
@@ -779,6 +789,12 @@ const normalizeChapter = (raw: any, traits: IMangaProviderTraits): IAggregatedMa
     ...(pages !== undefined ? { pages } : {}),
     ...(lang !== undefined ? { lang } : {}),
     // MangaHere misspells this as `releasedDate`; MangaDex/route contract use `releaseDate`.
+    // The resulting string is NOT of one format — MangaDex/FlameComics give ISO-8601, MangaHere
+    // gives 'Nov 05,2018'. Documented on the route typedef; deliberately not normalised here,
+    // because guessing a locale for a scraped string is how a wrong date gets invented.
+    // `publishAt` is kept LAST and is a trap if promoted: on MangaDex it is a scheduling field
+    // parked on a 2037 sentinel for externally-hosted chapters (see MangaDex.chapterReleaseDate),
+    // so it would date exactly the unreadable rows wrongly. No provider emits it today.
     ...(firstText(raw, ['releaseDate', 'releasedDate', 'updatedAt', 'publishAt']) !== undefined
       ? { releaseDate: firstText(raw, ['releaseDate', 'releasedDate', 'updatedAt', 'publishAt'])! }
       : {}),
@@ -1165,8 +1181,75 @@ class MangaAggregator {
 
   /**
    * Chapters for an AniList manga id. Walks providers in preference order (requested first, then
-   * the configured order) and returns the first that yields a non-empty chapter list. If nothing
-   * does, returns an empty result WITH a `reason` rather than a bare `[]`.
+   * strongest-confidence first) and returns the first that yields a chapter list it can actually
+   * serve. If nothing does, returns an empty result WITH a `reason` rather than a bare `[]`.
+   *
+   * ===========================================================================================
+   * THE SERVABILITY POLICY, AND WHY IT IS A FILTER RATHER THAN A RANKING
+   *
+   * THE BUG IT EXISTS FOR. Solo Leveling is AniList manga 105398. MangaDex asserts that id on its
+   * own record (`attributes.links.al`), so the `mangadex-links.al` bridge names the MangaDex id
+   * outright and the mapping is 'exact-id' — the strongest signal this file has, and it is CORRECT:
+   * that record really is Solo Leveling. But all 24 of its English chapters are `externalUrl`
+   * stubs (the pages live on webnovel.com), so every one of them carries
+   * `unavailable: { reason: 'external' }` and `fetchChapterPages` throws on all of them. The
+   * obvious user path — list chapters, read the first one — therefore 502'd on a top-10 title while
+   * five other registered providers were sitting there with real images.
+   *
+   * THE ACTUAL DEFECT was not the ordering. It was that ONE ranking key was being asked to answer
+   * TWO independent questions:
+   *     "is this the right series?"   — id confidence answers this, and answered it perfectly here
+   *     "can this provider serve pages?" — id confidence says NOTHING about this
+   * A record can be unambiguously the right book and still be a catalogue entry rather than a copy
+   * of it. So the two properties get two mechanisms and are never folded into one number:
+   *
+   *   CONFIDENCE RANKS.  It is the only sort key, and it now sorts ACROSS providers too, not just
+   *     within one (`byMangaConfidenceThenScore` over each provider's best candidate, registry
+   *     order breaking ties, an explicit `opts.provider` still pinned to the front). Before this,
+   *     the cross-provider walk was registry order, which meant a fall-through could hand an
+   *     'unverified' title guess to a caller while an 'exact-id' provider sat later in the list.
+   *   SERVABILITY ADMITS.  A candidate whose chapter list contains ZERO readable chapters is not
+   *     ranked lower — it is INADMISSIBLE as an answer to "give me something to read", exactly like
+   *     a candidate whose list came back empty, and the walk continues past it.
+   *
+   * NOTHING IS THROWN AWAY. The first (i.e. highest-confidence) all-unavailable list is HELD, and
+   * if no admissible candidate exists anywhere it is returned as-is — provider, confidence, `via`
+   * and every chapter's `unavailable` marker intact — with a `reason` saying why it is degraded.
+   * A caller therefore never gets LESS than it got before this policy: the worst case is today's
+   * answer plus an explanation, and the common case is a provider that actually works.
+   *
+   * WHERE THE LINE IS, AND WHY IT IS NOT A TUNABLE. Zero readable chapters, not "mostly
+   * unreadable". "Can this provider serve pages for this series" is a boolean, and any percentage
+   * threshold would be an invented number that eventually demotes a legitimately mostly-licensed
+   * series. A list with GAPS (Chainsaw Man's newest chapter is an external stub; an AsuraScans
+   * early-access chapter is `locked` on a timer) is served, because it can be read — the gaps are
+   * marked and the caller chooses. That distinction is the whole policy.
+   *
+   * WHAT WAS CONSIDERED AND REJECTED — each of these fixes Solo Leveling and manufactures a
+   * different mystery later, which is precisely the failure mode to avoid:
+   *   1. DEMOTE MangaDex, or reorder the registry. Fixes one title by breaking the general case:
+   *      Berserk is 425/425 readable on MangaDex, and demoting it hands that series to a scanlation
+   *      site matched on title similarity alone. Serving the WRONG SERIES is a worse failure than
+   *      serving no pages, because it is silent.
+   *   2. FOLD A READABILITY SCORE INTO THE SORT (confidence x readability). Same conflation with a
+   *      bigger number. Any single key mixing "is this the right book" with "can I open it" will
+   *      eventually rank a confidently-WRONG book above a confidently-right unreadable one, and
+   *      neither outcome is explicable from the score afterwards.
+   *   3. DETECT AT PAGE-FETCH TIME and re-try another provider inside `getPages`. Chapter ids are
+   *      provider-scoped and non-transferable — there is no way to map a MangaDex chapter id onto
+   *      an AsuraScans one without a chapter-ALIGNMENT layer that does not exist and would be a new
+   *      source of silent wrongness (split chapters, decimals, colour re-releases). It also swaps
+   *      the provider out from under a chapter list the caller has already rendered.
+   *   4. MARK-AND-RETURN AS THE PRIMARY ANSWER (the brief's third option, taken alone). Honest, but
+   *      it does not fix the reported bug: the user's obvious path still ends with nothing to read,
+   *      just with better prose. It is the right LAST resort, so that is exactly what it is here.
+   *   5. FILTER THE UNREADABLE CHAPTERS OUT of the list. That turns Solo Leveling's MangaDex answer
+   *      into an empty list and Chainsaw Man's newest chapter into a hole in the numbering. The
+   *      `unavailable` marker exists so the caller can see them, not so we can hide them.
+   *
+   * COST. One extra `fetchMangaInfo` per rejected candidate — the same cost the pre-existing
+   * empty-list fall-through already pays, bounded by the same per-provider budgets.
+   * ===========================================================================================
    *
    * LANGUAGE IS A SKIP, NOT A FILTER. A provider that cannot serve the requested language is
    * skipped outright and named in the reason. Post-filtering English chapters by `lang: 'pt-br'`
@@ -1190,11 +1273,32 @@ class MangaAggregator {
     const { byProvider } = await this.rankedFor(anilistId);
     const requestedId = String(anilistId);
 
-    const order = [opts.provider, ...this.providerNames].filter(Boolean) as string[];
+    // CONFIDENCE IS THE PRIMARY SORT, ACROSS PROVIDERS AND NOT ONLY WITHIN ONE. `rankedFor` already
+    // ordered each provider's own candidates confidence-first; this orders the PROVIDERS by the
+    // confidence of their best candidate, with registry position breaking ties (so the working-set
+    // order still decides between two equally-evidenced providers, and `Array.prototype.sort`'s
+    // stability is not relied on for it). A provider with no candidates sorts last and is skipped by
+    // the loop anyway. An explicit `opts.provider` stays pinned to the front — an explicit request
+    // outranks every heuristic, including this one.
+    const walk = this.providers
+      .map((e, index) => {
+        const key = e.parser.name.toLowerCase();
+        const best = (byProvider.get(key) ?? [])[0];
+        return { key, index, rank: best ? MANGA_CONFIDENCE_RANK[best.matchConfidence] : Number.MAX_SAFE_INTEGER };
+      })
+      .sort((a, b) => a.rank - b.rank || a.index - b.index)
+      .map(p => p.key);
+    const order = [opts.provider, ...walk].filter(Boolean) as string[];
     const tried = new Set<string>();
     const skippedForLang: string[] = [];
     let sawCandidates = false;
     let sawEmptyList = false;
+    // The best (= highest-confidence, first-walked) candidate that listed chapters but can serve
+    // NONE of them. Held, never discarded — see the servability policy in this method's doc. If the
+    // walk finds something admissible this is dropped on the floor; if it does not, this is the
+    // answer, and it is strictly more informative than the `{ provider: null, chapters: [] }` the
+    // caller would otherwise get.
+    let unreadableFallback: IMangaChaptersResult | undefined;
 
     for (const name of order) {
       const key = name.toLowerCase();
@@ -1231,7 +1335,7 @@ class MangaAggregator {
             sawEmptyList = true;
             continue;
           }
-          return {
+          const served: IMangaChaptersResult = {
             provider: candidate.provider,
             providerId: candidate.id,
             matchConfidence: candidate.matchConfidence,
@@ -1239,6 +1343,33 @@ class MangaAggregator {
             lang,
             chapters,
           };
+          // THE SERVABILITY FILTER. Not a ranking — see this method's doc. A list with SOME
+          // readable chapters is served as it always was (gaps are marked, the caller chooses);
+          // a list with NONE cannot answer "give me something to read" no matter how certain we
+          // are that it is the right series, so it is held and the walk continues.
+          const unreadable = chapters.filter(c => c.unavailable !== undefined);
+          if (unreadable.length === chapters.length) {
+            const reasons = [...new Set(unreadable.map(c => c.unavailable!.reason))].sort().join('/');
+            console.warn(
+              `[manga-aggregator] provider ${candidate.provider}: fetchMangaInfo("${candidate.id}") ` +
+                `("${candidate.title}") for AniList manga id ${requestedId} listed ${chapters.length} ` +
+                `chapter(s) but EVERY ONE is unreadable (${reasons}) — the match is fine ` +
+                `(${candidate.matchConfidence}${candidate.via ? ` via ${candidate.via}` : ''}), the provider ` +
+                `simply cannot serve pages for it; trying the next candidate/provider and keeping this ` +
+                `list as a fallback`
+            );
+            unreadableFallback ??= {
+              ...served,
+              reason:
+                `served by ${candidate.provider} (${candidate.matchConfidence}` +
+                `${candidate.via ? `, via ${candidate.via}` : ''}) but NOT READABLE: all ${chapters.length} ` +
+                `chapter(s) are marked unavailable (${reasons}), and no other registered provider ` +
+                `offered a readable list for this title. Each chapter carries its own 'unavailable' ` +
+                `marker — link out or grey it out rather than calling /manga/read on it.`,
+            };
+            continue;
+          }
+          return served;
         } catch (err) {
           // Fall through to the next candidate/provider — but log the REAL failure first, or a
           // provider outage becomes an indistinguishable silent skip.
@@ -1250,6 +1381,12 @@ class MangaAggregator {
         }
       }
     }
+
+    // Nothing admissible. A held all-unavailable list beats `{ provider: null, chapters: [] }` on
+    // every axis a caller cares about: it names the series, carries the real chapter list, and says
+    // per chapter WHY each one cannot be read. Returning null here instead would be discarding
+    // evidence we already paid for.
+    if (unreadableFallback) return unreadableFallback;
 
     let reason: string;
     if (!sawCandidates && skippedForLang.length)

@@ -71,6 +71,30 @@
 //   upgraded a label would defeat the entire point of the tier system, and a route that dropped
 //   `unavailable` would leave a reader to discover a locked chapter by getting an error from it.
 //
+// CONFIDENCE IS NOT SERVABILITY — what /manga/chapters can now hand back, and why:
+//   A provider can be certainly the right series and still serve zero pages for it. Solo Leveling
+//   (AniList manga 105398) is the case: MangaDex asserts that AniList id on its own record, so the
+//   mapping is 'exact-id' and CORRECT, but all 24 English chapters are webnovel.com `externalUrl`
+//   stubs. Listing chapters and reading the first one therefore used to end in a 502 from
+//   /manga/read on a top-10 title.
+//   The aggregator now treats readability as an ADMISSIBILITY FILTER rather than a ranking signal
+//   (the full argument, including the four alternatives rejected, is in `getChapters`'s doc in
+//   consumet/src/providers/meta/manga-aggregator.ts). Two consequences visible on this route, both
+//   ADDITIVE — no field changed shape, no status code moved:
+//     1. The `provider` that answers /manga/chapters may not be the highest-confidence one, when
+//        that one can serve nothing. `matchConfidence` still describes THE PROVIDER THAT ANSWERED,
+//        so it may legitimately read 'metadata' or 'unverified' where it used to read 'exact-id'.
+//        Clients that show a confidence badge were already reading it per response; nothing here
+//        rewrites it.
+//     2. `reason` is no longer "present iff provider is null". It is ALSO present on the one
+//        degraded success — a chapter list served even though every chapter in it is unavailable,
+//        which happens only when no provider anywhere had a readable list. That answer is still
+//        200 and still carries the full list with per-chapter `unavailable` markers, because it is
+//        strictly more useful than `{ provider: null, chapters: [] }`. A client that needs to
+//        branch should test `chapters.every(c => c.unavailable)`, not parse the prose.
+//   NOTHING IN THIS FILE IMPLEMENTS ANY OF THAT. It is stated here because this file is the
+//   published contract for the envelope, and the envelope's `reason` invariant moved.
+//
 // TIMEOUTS — why this surface needs a wall clock and /watch does not:
 //   MangaHere's `fetchChapterPages` issues one upstream request PER PAGE, SERIALLY. A 166-page
 //   chapter is ~167 requests and ~15s on the happy path, and its aggregator budget allows 600
@@ -167,7 +191,13 @@
 // @property {string} [volumeNumber]
 // @property {number} [pages]
 // @property {string} [lang]           translated language of this chapter
-// @property {string} [releaseDate]
+// @property {string} [releaseDate]   FORMAT IS PROVIDER-DEPENDENT, not ISO. MangaDex and
+//                                    FlameComics emit an ISO-8601 instant ('2018-01-31T07:07:06.000Z');
+//                                    MangaHere emits the site's own text ('Nov 05,2018'), as do
+//                                    MangaPark and VyvyManga. Since the servability policy landed,
+//                                    MangaHere answers Solo Leveling and One Piece by default, so
+//                                    one caller sees both shapes. Render verbatim, or parse
+//                                    defensively — `new Date(releaseDate)` is not guaranteed.
 // @property {{reason: string, detail?: string}} [unavailable]  listed but unreadable (external/locked/premium)
 //
 // @typedef {Object} MangaPage
@@ -194,7 +224,17 @@ const isLangTag = v => /^[a-z]{2}(-[a-z]{2,4})?$/i.test(String(v ?? ''));
 
 /** A repeated query param arrives as an ARRAY. Every guard below is written as a string test, so
  *  an array must be rejected outright rather than silently stringified past one. Same class of bug
- *  as the /manga/read multiplicity guard. */
+ *  as the /manga/read multiplicity guard.
+ *
+ *  DUPLICATED, deliberately: a BYTE-IDENTICAL `isSingle` lives in api/src/server.mjs (grep
+ *  `const isSingle`), where it guards /watch, /episodes and /proxy. Change one, change the other.
+ *
+ *  Not every param on these routes needs it. /manga/search's `q`/`page` and /manga/chapters'
+ *  `lang`/`provider` already fail CLOSED on an array, because each is coerced with `String(v)`
+ *  before a shape test that an array cannot satisfy: a repeated param always yields >= 2 elements,
+ *  so the join always contains a comma, and neither `isLangTag`'s anchored regex nor
+ *  `canonicalProvider`'s exact name match can accept one. Measured — see the arity sweep in
+ *  test/server-repeated-params.test.mjs for the server.mjs half of the same audit. */
 const isSingle = v => v === undefined || typeof v === 'string';
 
 // ---- wall-clock deadlines (see TIMEOUTS in the header) ---------------------------------------
@@ -520,6 +560,10 @@ export default async function mangaRoutes(app, opts = {}) {
   // answer to a well-formed question — the same choice /episodes makes — and the `reason` is the
   // payload. A 404 would throw the reason away and make "no provider serves pt-br" look like "no
   // such manga".
+  //
+  // AND 200 WITH A PROVIDER *AND* A `reason` for the one degraded case: a list every chapter of
+  // which is `unavailable`, returned only when no provider had a readable one. See "CONFIDENCE IS
+  // NOT SERVABILITY" in the header — this route does not produce it, it only refuses to drop it.
   //
   // Divergence: ?lang= (translated language) has no anime analogue; a provider's chapter list is
   // per-language, so it is a first-class filter rather than a post-hoc choice.
