@@ -37,8 +37,9 @@ import { USER_AGENT } from '../../utils';
  * `vm.CurPathName` and then *constructed* filenames by zero-padding a page counter, because
  * MangaSee never served a list. WeebCentral serves a real `<img>` list, and it must be used:
  * the CDN host varies per series (Goodnight Punpun is on `official.lowee.us`, One Piece is on
- * `scans-hot.planeptune.us` — both confirmed live), so there is no host to pin and no filename to
- * construct. Read the list; never build a URL.
+ * `hot.planeptune.us` — both re-confirmed live 2026-08-14), so there is no host to pin and no
+ * filename to construct. Read the list; never build a URL. The planeptune host in particular has
+ * rotated before (it was `scans-hot.planeptune.us`), which is exactly why it is never hardcoded.
  */
 class Mangasee123 extends MangaParser {
   override readonly name = 'WeebCentral';
@@ -477,8 +478,11 @@ class Mangasee123 extends MangaParser {
           // Carried for parity with the rest of the manga providers, NOT because it is required:
           // both page CDNs were fetched live with no Referer, with `weebcentral.com`, and with a
           // deliberately hostile `evil.example.com`, and all three returned byte-identical images
-          // (official.lowee.us 480,153 B; scans-hot.planeptune.us 182,781 B). There is no hotlink
-          // protection, so these images do not need a server-side proxy hop.
+          // (re-measured 2026-08-14: Oyasumi-Punpun/0001-001.png on official.lowee.us is 526,454 B
+          // and One-Piece/0001-001.png on hot.planeptune.us is 345,017 B, each byte-identical
+          // across all three referer shapes). There is no hotlink protection, so these images do
+          // not strictly need a server-side proxy hop — but note the API layer proxies them anyway,
+          // because these CDNs send no Access-Control-Allow-Origin and the host set rotates.
           //
           // One real gotcha for consumers: the URLs end in `.png` and the CDN answers
           // `Content-Type: image/png`, but the bytes are JPEG (`ffd8ffe0`, JFIF) on both hosts.

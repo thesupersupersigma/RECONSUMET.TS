@@ -145,8 +145,10 @@ output:
 ```
 
 Page image URLs are **read from the served `<img>` list, never constructed**: the CDN host varies
-per series (`official.lowee.us` for Goodnight Punpun, `scans-hot.planeptune.us` for One Piece), so
-there is no host to pin and no filename scheme to rebuild.
+per series (`official.lowee.us` for Goodnight Punpun, `hot.planeptune.us` for One Piece — both
+re-confirmed live 2026-08-14), so there is no host to pin and no filename scheme to rebuild. The
+planeptune host has rotated before (it was `scans-hot.planeptune.us`), which is the whole reason
+these URLs are read rather than built.
 
 <h4>Two things worth knowing before you render these</h4>
 
