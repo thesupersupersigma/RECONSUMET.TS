@@ -208,10 +208,11 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { Readable } from 'node:stream';
 import { assertUrlSafe, followSafeRedirects, SsrfError } from './ssrf-guard.mjs';
-
-/** Local copy of server.mjs's validator. Duplicated (4 tokens) rather than editing server.mjs to
- *  export it; if a third module ever needs it, lift both to a shared validators module. */
-const isNumericId = v => /^\d+$/.test(String(v ?? ''));
+// `isNumericId`, `isSingle` and the outbound-header helpers are SHARED with server.mjs rather than
+// copied into both files. They used to be duplicated here behind a "change one, change the other"
+// comment, which is precisely how /proxy's `ref` ended up without the scheme check this file's
+// /manga/image already had. See ./validators.mjs.
+import { isNumericId, isSingle, headerSafe, isRefererUrl } from './validators.mjs';
 
 /** Local copy of server.mjs's browser UA, for the same reason and with the same value. Every CDN
  *  behind these routes is Cloudflare-fronted and at least one provider already 403s a bot UA. */
@@ -222,20 +223,12 @@ const UA =
  *  provider query param, so it is allowlisted by SHAPE, not merely trusted. */
 const isLangTag = v => /^[a-z]{2}(-[a-z]{2,4})?$/i.test(String(v ?? ''));
 
-/** A repeated query param arrives as an ARRAY. Every guard below is written as a string test, so
- *  an array must be rejected outright rather than silently stringified past one. Same class of bug
- *  as the /manga/read multiplicity guard.
- *
- *  DUPLICATED, deliberately: a BYTE-IDENTICAL `isSingle` lives in api/src/server.mjs (grep
- *  `const isSingle`), where it guards /watch, /episodes and /proxy. Change one, change the other.
- *
- *  Not every param on these routes needs it. /manga/search's `q`/`page` and /manga/chapters'
- *  `lang`/`provider` already fail CLOSED on an array, because each is coerced with `String(v)`
- *  before a shape test that an array cannot satisfy: a repeated param always yields >= 2 elements,
- *  so the join always contains a comma, and neither `isLangTag`'s anchored regex nor
- *  `canonicalProvider`'s exact name match can accept one. Measured — see the arity sweep in
- *  test/server-repeated-params.test.mjs for the server.mjs half of the same audit. */
-const isSingle = v => v === undefined || typeof v === 'string';
+// NOTE on `isSingle` (imported above): not every param on these routes needs it. /manga/search's
+// `q`/`page` and /manga/chapters' `lang`/`provider` already fail CLOSED on an array, because each
+// is coerced with `String(v)` before a shape test that an array cannot satisfy: a repeated param
+// always yields >= 2 elements, so the join always contains a comma, and neither `isLangTag`'s
+// anchored regex nor `canonicalProvider`'s exact name match can accept one. Measured — see the
+// arity sweep in test/server-repeated-params.test.mjs for the server.mjs half of the same audit.
 
 // ---- wall-clock deadlines (see TIMEOUTS in the header) ---------------------------------------
 
@@ -695,8 +688,15 @@ export default async function mangaRoutes(app, opts = {}) {
       if (e instanceof SsrfError) return reply.code(400).send({ error: `'url' rejected: ${e.message}` });
       return reply.code(400).send({ error: "invalid 'url' query param" });
     }
-    const ref = typeof rawRef === 'string' ? rawRef.replace(/[\r\n]/g, '') : undefined;
-    if (ref && !/^https?:\/\//i.test(ref))
+    // STRIP, THEN VALIDATE — the weaker of the two orders, kept because a committed test pins it
+    // (`https://mangapill.com/\r\nX-Injected: yes` is accepted here as its stripped form, and is
+    // asserted to arrive as one header value). /proxy validates the RAW value and 400s instead;
+    // that is the better order and the two should converge. Neither is exploitable — see the
+    // measured threat model in ./validators.mjs — so this is a message-quality difference, not a
+    // security one. `isRefererUrl` is stricter than the `/^https?:\/\//i` regex it replaces:
+    // `https://` and `http://[nonsense` passed that and fail this.
+    const ref = headerSafe(rawRef);
+    if (ref && !isRefererUrl(ref))
       return reply.code(400).send({ error: "'ref' must be an http(s) url" });
 
     let up;

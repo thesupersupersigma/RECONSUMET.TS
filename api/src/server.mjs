@@ -40,6 +40,7 @@ import { Readable } from 'node:stream';
 import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import { assertUrlSafe, followSafeRedirects, SsrfError } from './ssrf-guard.mjs';
+import { isSingle, isNumericId, isRefererUrl, originHeaderValue, isHeaderToken } from './validators.mjs';
 import mangaRoutes, { createMangaAggregator } from './manga-routes.mjs';
 import pkg from '../../consumet/dist/index.js';
 
@@ -177,33 +178,13 @@ const requireApiKey = async (req, reply) => {
 const apiGuard = tier => [requireApiKey, rateLimit(tier)];
 
 // validation helpers
-const isNumericId = v => /^\d+$/.test(String(v ?? ''));
-/**
- * A REPEATED query param (`?x=a&x=b`) arrives from Fastify's querystring parser as an ARRAY, not a
- * string. Every guard in this file is written as a string test — `typeof v === 'string' && ...`,
- * `v.startsWith(...)`, a regex — so an array either skips the guard entirely or gets silently
- * stringified with a comma past it. This is a property of the PARSER, not of any one param, so
- * every user-controlled query value below is checked with this before it is used.
- *
- * DUPLICATED, deliberately: a BYTE-IDENTICAL `isSingle` lives in api/src/manga-routes.mjs (grep
- * `const isSingle`) and is used by /manga/read and /manga/image. Both copies exist on purpose (a
- * one-liner is cheaper than a cross-module import); if you change one, change the other. Cited by
- * name rather than by line number on purpose — the first pointer here named a line, and an
- * unrelated doc edit to manga-routes.mjs shifted the definition out from under it.
- */
-const isSingle = v => v === undefined || typeof v === 'string';
+// `isSingle`, `isNumericId` and the outbound-header validators (`isRefererUrl`,
+// `originHeaderValue`, `isHeaderToken`) are imported from ./validators.mjs, shared with
+// api/src/manga-routes.mjs. They used to be copy-pasted into both files behind a "change one,
+// change the other" comment; that is how /proxy ended up without the scheme check /manga/image
+// has. See that module's header for the measured threat model behind the header validators.
 /** Escape a user-supplied string for literal use inside a RegExp source. */
 const reEscape = s => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-/** Strip CR/LF from a value destined for an outbound request HEADER (header-injection guard). */
-const headerSafe = v => (typeof v === 'string' ? v.replace(/[\r\n]/g, '') : v);
-const isHttpUrl = v => {
-  try {
-    const u = new URL(v);
-    return u.protocol === 'http:' || u.protocol === 'https:';
-  } catch {
-    return false;
-  }
-};
 
 // ---- proxy link building + HLS rewrite ----
 
@@ -327,6 +308,18 @@ const impersonatedFetch = (target, { referer, range, extraHeaders }) =>
     // sec-fetch/accept/origin set; the UA + sec-ch-ua + TLS fingerprint come from the
     // impersonation profile. (Use the single-binary `--impersonate` build so these
     // -H values cleanly override the profile defaults instead of duplicating them.)
+    //
+    // WHERE THESE VALUES COME FROM (audited: every header below that is not a literal):
+    //   referer / extraHeaders  — /proxy's `ref`, `km` and `org`, each shape-validated at the route
+    //                             boundary against ./validators.mjs before it gets here.
+    //   origin (derived)        — `new URL(referer || target).origin`. Both inputs are validated
+    //                             http(s) URLs by the time they arrive, so this is a real origin;
+    //                             an unvalidated `ref` used to be able to make it the literal
+    //                             string "null" (e.g. ref=javascript:alert(1)).
+    //   range                   — the CLIENT's own Range header, which Node's HTTP parser already
+    //                             refuses to deliver with a control character in it, so it needs
+    //                             no second check. (Duplicate Range headers are joined by Node
+    //                             with ", " into one string, never an array.)
     let origin;
     try {
       origin = new URL(referer || target).origin;
@@ -596,13 +589,33 @@ app.get('/proxy', { preHandler: rateLimit('proxy') }, async (req, reply) => {
   // None of those want an array, so none of them get one.
   if (![target, rawRef, pk, rawKm, rawOrg, aud].every(isSingle))
     return reply.code(400).send({ error: "'url', 'ref', 'pk', 'km', 'org' and 'aud' must each be given at most once" });
-  // ref/org/km land in outbound request headers. undici rejects a CRLF-bearing header value (the
-  // plain-fetch path fails closed with a 502), but the curl-impersonate path passes them as `-H`
-  // argv where nothing would split them — so they are newline-stripped here, once, for both paths.
-  // Same treatment /manga/image already gives its own `ref`.
-  const ref = headerSafe(rawRef);
-  const km = headerSafe(rawKm);
-  const org = headerSafe(rawOrg);
+  // ref/org/km land in OUTBOUND REQUEST HEADERS, so each is validated by SHAPE here — rejected,
+  // not sanitised (see api/src/validators.mjs, which owns all three checks and the measurements
+  // behind them). Empty string is treated as absent, matching /manga/image and matching wrapUrl,
+  // which omits an empty param rather than emitting `&ref=`.
+  //
+  // WHAT THIS IS AND IS NOT. It is NOT a header-injection fix: neither transport can be made to
+  // emit a second header. undici throws on a CR/LF-bearing value (the plain-fetch path already
+  // fails closed with a 502), and the curl-impersonate path passes each header as one element of a
+  // spawn() argv array with no shell, so `-H` / `${k}: ${v}` cannot be split — measured on the real
+  // path with test/fixtures/fake-curl.mjs, which dumps its own argv. A colon inside a header value
+  // is legal, so `ref=https://a.example/X-Injected: pwned` was always ONE odd Referer, never two
+  // headers. What it IS: parity with /manga/image, which has scheme-checked its `ref` all along
+  // while /proxy — older and far more used — did not; and it stops `ref=javascript:alert(1)` both
+  // from becoming a Referer and from becoming `Origin: null` upstream (impersonatedFetch derives
+  // the Origin from the referer when the caller supplies no `org`).
+  if (rawRef && !isRefererUrl(rawRef))
+    return reply.code(400).send({ error: "'ref' must be an http(s) url" });
+  if (rawKm && !isHeaderToken(rawKm))
+    return reply.code(400).send({ error: "'km' must be a printable token with no spaces (<= 256 chars)" });
+  // An Origin is a SERIALIZED ORIGIN, not a URL — scheme + host + optional port, no path. Stricter
+  // than the referer check on purpose, and normalised (a trailing slash is dropped) rather than
+  // relayed verbatim.
+  const org = rawOrg ? originHeaderValue(rawOrg) : undefined;
+  if (rawOrg && !org)
+    return reply.code(400).send({ error: "'org' must be a serialized origin (scheme://host[:port], no path)" });
+  const ref = rawRef || undefined;
+  const km = rawKm || undefined;
   // SSRF guard: scheme + private/loopback/link-local/metadata range blocking, resolving DNS. Redirect
   // targets are re-validated inside proxiedUpstream's plain-fetch path (followSafeRedirects).
   try {
