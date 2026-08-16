@@ -21,8 +21,19 @@
 //   DEBUG_INFO             if "1"/"true", the / route also exposes TLS-impersonation diagnostics (off by default)
 //   HTTP_TIMEOUT_MS        (consumet lib) AniList/provider axios timeout (ms, default 20000)
 //   PROXY_TIMEOUT_MS       upstream timeout for /proxy fetches — both plain fetch and curl-impersonate (ms, default 30000)
-//   PUBLIC_URL             public base url used when building /proxy links (default derived from the request);
-//                          set to the tunnel/public origin so rewritten playlists point back at us, not localhost.
+//   PUBLIC_URL             public base url used when building /proxy and /manga/image links. REQUIRED
+//                          in any deployment: set it to the tunnel/public origin so rewritten playlists
+//                          point back at us, not localhost. Validated at startup (http(s), no
+//                          credentials/query/fragment) — a bad value exits instead of listening. When
+//                          unset, links are derived from the request ONLY for a loopback Host arriving
+//                          over a loopback socket (local dev); any other request answers 500. It is NOT
+//                          derived from Host or X-Forwarded-Proto in general — both are client-supplied
+//                          and were measured forgeable. See "THE PUBLIC BASE" in src/validators.mjs.
+//   PUBLIC_URL_ALLOWED_ORIGINS
+//                          optional comma-list of ADDITIONAL absolute origins this deployment answers on
+//                          (apex + www, a tunnel alongside the real domain). A request whose Host matches
+//                          one gets that configured origin in its links; anything else gets PUBLIC_URL.
+//                          The Host only ever SELECTS from this list — it never contributes a byte.
 //   CURL_IMPERSONATE_BIN   path to a curl-impersonate binary/wrapper (e.g. .../curl-impersonate). When set,
 //                          fetches to TLS_IMPERSONATE_HOSTS go through it to clear Cloudflare JA3 gates.
 //                          When empty, TLS impersonation silently no-ops (plain fetch → those hosts 403).
@@ -40,7 +51,7 @@ import { Readable } from 'node:stream';
 import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import { assertUrlSafe, followSafeRedirects, SsrfError } from './ssrf-guard.mjs';
-import { isSingle, isNumericId, isRefererUrl, originHeaderValue, isHeaderToken } from './validators.mjs';
+import { isSingle, isNumericId, isRefererUrl, originHeaderValue, isHeaderToken, resolvePublicBaseEnv } from './validators.mjs';
 import mangaRoutes, { createMangaAggregator } from './manga-routes.mjs';
 import pkg from '../../consumet/dist/index.js';
 
@@ -110,6 +121,16 @@ const RL_TIERS = {
 };
 const API_KEY = process.env.API_KEY || ''; // OFF by default — set to require auth on data routes
 const DEBUG_INFO = /^(1|true)$/i.test(process.env.DEBUG_INFO || '');
+
+// --- the public origin used in every link we mint (see "THE PUBLIC BASE" in ./validators.mjs) ---
+// Parsed ONCE here and checked before anything listens, so a typo'd PUBLIC_URL is a one-line
+// startup failure rather than a fleet of subtly wrong links. manga-routes.mjs reads the same env
+// through the same function, so /proxy and /manga/image can never disagree again.
+const PUBLIC_BASE = resolvePublicBaseEnv();
+if (PUBLIC_BASE.error) {
+  console.error(`anime-api: refusing to start — ${PUBLIC_BASE.error.message}`);
+  process.exit(1);
+}
 
 // trustProxy scoped to our own proxy hop (see RL_TRUST_PROXY above): the socket IP is Traefik's,
 // so we resolve the real client IP from X-Forwarded-For for per-IP keying — but only trusting
@@ -188,7 +209,31 @@ const reEscape = s => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 // ---- proxy link building + HLS rewrite ----
 
-const proxyBase = req => process.env.PUBLIC_URL || `${req.protocol}://${req.headers.host}`;
+// The origin every generated link is prefixed with. NOT derived from `req.headers.host` or
+// `req.protocol` — both are client-supplied, and both were measured to be forgeable here (a Host of
+// `evil.attacker.example` came back inside pages[].img and inside every URI of a rewritten
+// playlist; `X-Forwarded-Proto: gopher` came back as the scheme, because Fastify's trustProxy
+// forwards that header unvalidated). See "THE PUBLIC BASE" in ./validators.mjs for the measurements,
+// the rejected alternatives, and why the loopback dev fallback cannot fire in production.
+// Shared with manga-routes.mjs's /manga/image links, which is the whole reason it lives there: the
+// two copies of this helper were byte-identical and only one of them would have been fixed.
+const proxyBase = PUBLIC_BASE.resolve;
+
+/**
+ * Resolve the public base, or answer 500 and return null. LOUD ON PURPOSE: the failure being fixed
+ * is a misconfigured server quietly emitting attacker-controlled links, so the replacement must not
+ * be a quietly-wrong-but-safe link (a root-relative `sources[].url` would silently break the
+ * cross-origin frontend). The message names the variable to set; `err` puts it in the log too.
+ */
+const baseOr500 = (req, reply) => {
+  try {
+    return proxyBase(req);
+  } catch (e) {
+    req.log.error({ err: e, host: req.headers.host }, 'cannot resolve the public base for this request');
+    reply.code(500).send({ error: e.message });
+    return null;
+  }
+};
 const wrapUrl = (base, url, ref, pk, km, org, aud) =>
   `${base}/proxy?url=${encodeURIComponent(url)}` +
   `${ref ? `&ref=${encodeURIComponent(ref)}` : ''}` +
@@ -519,7 +564,8 @@ app.get('/watch', { preHandler: apiGuard('watch') }, async (req, reply) => {
     }
   }
 
-  const base = proxyBase(req);
+  const base = baseOr500(req, reply);
+  if (base === null) return reply;
   // shape ONE server's ISource into a response object, or null if it has no sources. Each
   // source/subtitle url is wrapped through /proxy (Referer-injecting + TLS-impersonating),
   // with the original kept as rawUrl. m3u8 sources thread the playlist-deobfuscation key
@@ -659,9 +705,13 @@ app.get('/proxy', { preHandler: rateLimit('proxy') }, async (req, reply) => {
   const isPlaylist = ct.includes('mpegurl') || /\.m3u8(\?|$)/.test(target);
 
   if (isPlaylist) {
+    // Only the playlist branch mints links, so only it needs a base — a segment/key/vtt passthrough
+    // below is unaffected by a missing PUBLIC_URL and must not be broken by this check.
+    const base = baseOr500(req, reply);
+    if (base === null) return reply;
     const text = setDefaultAudio(deobfuscatePlaylist(await up.text(), pk), aud);
     reply.header('content-type', 'application/vnd.apple.mpegurl');
-    return reply.send(rewriteM3U8(text, new URL(target), ref, proxyBase(req), pk, km, org, aud));
+    return reply.send(rewriteM3U8(text, new URL(target), ref, base, pk, km, org, aud));
   }
 
   // segments / keys / vtt — stream through, preserving range/length headers

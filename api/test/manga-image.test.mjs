@@ -83,6 +83,9 @@ before(async () => {
       PORT: String(port),
       IMAGE_CANARY_URL: canaryUrl,
       MANGA_IMAGE_MAX_BYTES: String(CEILING),
+      // Deliberately unset: the local-dev path, where a link origin may be derived from the request
+      // because both the Host and the raw socket peer are loopback. Not the deployed default —
+      // that requires PUBLIC_URL and 500s without it. See "THE PUBLIC BASE" in src/validators.mjs.
       PUBLIC_URL: '',
     },
     stdio: ['ignore', 'pipe', 'pipe'],

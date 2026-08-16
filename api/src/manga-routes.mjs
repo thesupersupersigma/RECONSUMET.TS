@@ -21,7 +21,12 @@
 //   MANGA_DIRECT_IMAGE_HOSTS  comma-list of image-CDN host suffixes to link DIRECTLY, skipping
 //                             the proxy entirely (default EMPTY — proxy everything; see
 //                             "DOES EVERY IMAGE NEED THE PROXY?" below)
-//   PUBLIC_URL                origin used for /manga/image links (shared with server.mjs)
+//   PUBLIC_URL                origin used for /manga/image links. Shared with server.mjs through
+//                             validators.mjs's resolvePublicBaseEnv() — the SAME resolver object, not
+//                             a second copy of the derivation. Unset → links are request-derived only
+//                             for a loopback Host over a loopback socket (local dev); anything else
+//                             is a 500. Never derived from Host/X-Forwarded-Proto in general.
+//   PUBLIC_URL_ALLOWED_ORIGINS  optional extra origins this deployment answers on (see server.mjs)
 //   RATE_LIMIT_IMAGE          per-IP/min for /manga/image (read by server.mjs, default 300)
 //
 // THE AGGREGATOR IS INJECTED, NOT IMPORTED. This module still imports nothing from
@@ -246,7 +251,7 @@ import { assertUrlSafe, followSafeRedirects, SsrfError } from './ssrf-guard.mjs'
 // copied into both files. They used to be duplicated here behind a "change one, change the other"
 // comment, which is precisely how /proxy's `ref` ended up without the scheme check this file's
 // /manga/image already had. See ./validators.mjs.
-import { isNumericId, isSingle, headerSafe, isRefererUrl } from './validators.mjs';
+import { isNumericId, isSingle, headerSafe, isRefererUrl, resolvePublicBaseEnv } from './validators.mjs';
 
 /** Local copy of server.mjs's browser UA, for the same reason and with the same value. Every CDN
  *  behind these routes is Cloudflare-fronted and at least one provider already 403s a bot UA. */
@@ -306,7 +311,8 @@ const withTimeout = (work, ms, label) => {
  *
  * WHY AsyncLocalStorage AND NOT A PARAMETER. `MangaAggregator`'s `imageProxy` seam is a
  * CONSTRUCTOR option — one function, installed once, called once per page deep inside `getPages`.
- * The origin it must produce is PER REQUEST (`req.headers.host`, unless PUBLIC_URL pins it). The
+ * The origin it must produce is PER REQUEST (PUBLIC_URL pins it; otherwise it is whichever
+ * configured origin this request's Host selected — see "THE PUBLIC BASE" in ./validators.mjs). The
  * alternatives are worse: a module-level "current base" is a data race between two concurrent
  * readers on different hosts, and re-mapping the pages in the handler afterwards LOSES DATA —
  * `getPages` picks a per-page Referer (MangaHere emits `headerForImage` per page) and bakes it into
@@ -352,13 +358,18 @@ export const isDirectImageHost = rawImg => {
  * no PUBLIC_URL set (a direct library caller) — still a correct same-origin link, and honest about
  * the fact that nothing told us the origin.
  *
+ * INSIDE a request the store is set by /manga/read, and the store now holds a CONFIGURED origin —
+ * never a request header. The root-relative fallback is reachable only with no ALS store at all,
+ * i.e. from a direct library caller, so no HTTP response can be silently downgraded to it: the
+ * route resolves the base and answers 500 before `getPages` is ever called.
+ *
  * A host on DIRECT_IMAGE_HOSTS is returned UNCHANGED, so `img === rawImg` and the browser fetches
  * the CDN itself. Off by default, so this is a no-op on the shipped `pages[].img` contract.
  */
 export const mangaImageProxy = (rawImg, ref) =>
   isDirectImageHost(rawImg)
     ? rawImg
-    : `${imageBase.getStore() ?? process.env.PUBLIC_URL ?? ''}/manga/image?url=${encodeURIComponent(rawImg)}` +
+    : `${imageBase.getStore() ?? PUBLIC_BASE.publicUrl?.base ?? ''}/manga/image?url=${encodeURIComponent(rawImg)}` +
       (ref ? `&ref=${encodeURIComponent(ref)}` : '');
 
 /**
@@ -374,8 +385,18 @@ export const mangaImageProxy = (rawImg, ref) =>
 export const createMangaAggregator = (MangaAggregator, options = {}) =>
   new MangaAggregator({ imageProxy: mangaImageProxy, ...options });
 
-/** Same derivation server.mjs's proxyBase() uses, so /manga/image and /proxy links agree. */
-const publicBase = req => process.env.PUBLIC_URL || `${req.protocol}://${req.headers.host}`;
+/**
+ * The origin /manga/image links are built against. There is no second derivation any more: this and
+ * server.mjs's `proxyBase` are now the SAME function object out of ./validators.mjs, reading the
+ * same env once. They used to be two byte-identical copies under a comment promising they agreed —
+ * and they did agree, on trusting `req.headers.host`, which is how a forged Host got into
+ * `pages[].img`. See "THE PUBLIC BASE" in ./validators.mjs.
+ *
+ * Env is read at module load like every other knob here. `PUBLIC_BASE.error` is checked in the
+ * plugin body below so a bad PUBLIC_URL fails registration rather than every request.
+ */
+const PUBLIC_BASE = resolvePublicBaseEnv();
+const publicBase = PUBLIC_BASE.resolve;
 
 // ---- shared handler helpers ------------------------------------------------------------------
 
@@ -536,6 +557,10 @@ export default async function mangaRoutes(app, opts = {}) {
       'mangaRoutes requires an { aggregator } option (a MangaAggregator, or a fake exposing ' +
         'search/getMappings/getChapters/getPages/providerNames)'
     );
+  // Same reasoning, for the link origin: a malformed PUBLIC_URL / PUBLIC_URL_ALLOWED_ORIGINS is a
+  // deployment mistake, and a failed boot is the only report of it nobody can miss. server.mjs
+  // checks the same object and exits with the message first; this covers a standalone mount.
+  if (PUBLIC_BASE.error) throw PUBLIC_BASE.error;
 
   // ---- search ------------------------------------------------------------------------------
   // Mirrors GET /search exactly: same 'default' tier, same q/page validation, same 400 bodies,
@@ -655,9 +680,21 @@ export default async function mangaRoutes(app, opts = {}) {
     const name = canonicalProvider(agg, provider);
     if (!name) return unknownProvider(reply, agg, provider);
 
+    // Resolve the link origin BEFORE the upstream call: a base we cannot resolve means we cannot
+    // mint `pages[].img`, and answering 500 up front is both louder and cheaper than scraping a
+    // chapter and then discovering we have nowhere to point at. See "THE PUBLIC BASE" in
+    // ./validators.mjs for why this can only fail on a misconfigured deployment.
+    let base;
+    try {
+      base = publicBase(req);
+    } catch (e) {
+      req.log?.error?.({ err: e, host: req.headers.host }, 'cannot resolve the public base for this request');
+      return reply.code(500).send({ error: e.message });
+    }
+
     let result;
     try {
-      result = await imageBase.run(publicBase(req), () =>
+      result = await imageBase.run(base, () =>
         withTimeout(
           agg.getPages(name, chapterId, req.query.lang ? { lang: String(req.query.lang) } : {}),
           MANGA_READ_TIMEOUT_MS,

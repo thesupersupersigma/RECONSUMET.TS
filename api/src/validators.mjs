@@ -10,6 +10,12 @@
 // now live here and both route modules import them. The cross-referencing "change one, change the
 // other" comments are gone with the copies they described.
 //
+// It happened a SECOND time, exactly as predicted, with the public-origin helper: server.mjs's
+// `proxyBase()` and manga-routes.mjs's `publicBase()` were byte-identical copies under a comment
+// reading "same derivation server.mjs's proxyBase() uses". Both trusted `req.headers.host`. Fixing
+// one would have left the other open, so `resolvePublicBaseEnv` at the bottom of this file is now
+// the single definition of "what origin is this server allowed to put in a link".
+//
 // WHAT THE HEADER VALIDATORS ARE ACTUALLY FOR — read this before hardening them further, because
 // the threat model was measured, not assumed (probe: a stand-in curl binary that dumps its argv,
 // now committed as test/fixtures/fake-curl.mjs, plus a loopback listener echoing rawHeaders):
@@ -142,3 +148,237 @@ export const originHeaderValue = v => {
  * needs a space, a control character or a kilobyte.
  */
 export const isHeaderToken = v => typeof v === 'string' && v.length > 0 && v.length <= 256 && /^[\x21-\x7e]+$/.test(v);
+
+// =================================================================================================
+// THE PUBLIC BASE — the origin this server is allowed to put inside a link it mints.
+// =================================================================================================
+//
+// WHAT WAS WRONG. Both route modules built links as
+//     process.env.PUBLIC_URL || `${req.protocol}://${req.headers.host}`
+// so with PUBLIC_URL unset every generated URL was a verbatim echo of a CLIENT-SUPPLIED header.
+// Measured against the real routes plugin (probe: raw http.request with a forged Host):
+//     Host: evil.attacker.example        -> pages[].img = http://evil.attacker.example/manga/image?...
+//     Host: evil.attacker.example:8443   -> ...:8443/manga/image?...   (ports ride along)
+//     Host: [::1]:9999                   -> http://[::1]:9999/...      (IPv6 rides along)
+// The same helper feeds the /watch source wrapper and the HLS playlist rewrite, so a forged Host
+// also redirects every segment, key and sub-playlist URI in a rewritten m3u8. `/manga/read` answers
+// carry a provider-chosen `Cache-Control` — up to a year, `immutable`, for content-addressed CDNs —
+// so a shared cache keyed on the URL and not on Host turns this from "the attacker poisons their
+// own response" into "the attacker poisons everyone's".
+//
+// `req.protocol` IS ALSO CLIENT-CONTROLLED, and the brief did not mention it. server.mjs runs
+// Fastify with `trustProxy: ['loopback','linklocal','uniquelocal']` and Fastify then reads
+// `req.protocol` straight out of `X-Forwarded-Proto` WITHOUT VALIDATING IT. Measured on that exact
+// config: `X-Forwarded-Proto: gopher` from a loopback peer yields `req.protocol === 'gopher'`, i.e.
+// `gopher://host/proxy?...`. Any caller inside the trusted ranges (loopback, link-local, private —
+// in production that is our own Docker network) can therefore pick the SCHEME too.
+//
+// WHAT IS *NOT* WRONG, measured, so nobody re-hardens the wrong thing: `X-Forwarded-Host` does NOT
+// reach this code. Fastify folds it into `req.hostname`, and both helpers read `req.headers.host`,
+// which stays the on-the-wire Host. Sending `X-Forwarded-Host: evil2.attacker.example` changed
+// nothing in the probe above. The fix below never reads either forwarded header.
+//
+// THE RULE, AND WHY IT IS THIS ONE. The set of origins this server may emit is now ENUMERATED IN
+// CONFIG. A request header can only ever SELECT among origins an operator already wrote down; it
+// can never contribute a byte to one. That is the difference between an allowlist and sanitising a
+// header, and it is why no amount of Host/port/IPv6/userinfo cleverness in the header matters here.
+//
+// Rejected alternatives, in the order the brief lists them:
+//
+//   * "Require PUBLIC_URL, fail at startup if unset." Safest and simplest, and genuinely tempting.
+//     Rejected because the cost is real and avoidable: README.md documents the default as "derived
+//     from request", and every offline harness in api/test — manga-wired, manga-image, manga-routes,
+//     server-ssrf, server-repeated-params — spawns a server on 127.0.0.1 with no PUBLIC_URL. Two of
+//     them set `PUBLIC_URL: ''` *deliberately*, one with the comment "which is what the deployed
+//     default does when PUBLIC_URL is not configured", and assert request-derived same-origin links.
+//     A hard startup requirement breaks `node src/server.mjs` for a developer as well. The loopback
+//     escape hatch below buys all of that back while giving up nothing in production (see WHY THE
+//     DEV FALLBACK CANNOT FIRE IN PRODUCTION).
+//
+//   * "Trust a forwarded header when a trusted-proxy setting says so." Rejected outright. This
+//     codebase already has the scar: see RL_TRUST_PROXY in server.mjs, where `trustProxy: true`
+//     let any client forge `X-Forwarded-For` and mint a fresh rate-limit bucket per request. The
+//     sibling site repo has the same bug in its live form. A trusted-proxy setting is a promise
+//     about network topology that nothing in the process can verify, and it is wrong by default on
+//     every machine that is not the one deployment it was written for. An allowlist of origins is
+//     a promise about OUR OWN NAMES, which we do know. Note the measurement above: Fastify's
+//     `req.protocol` is exactly this trap already sprung — an unvalidated forwarded header, trusted
+//     because a setting said a peer range was fine. Nothing below reads `req.protocol`.
+//
+// WHY THE DEV FALLBACK CANNOT FIRE IN PRODUCTION. With NEITHER `PUBLIC_URL` nor
+// `PUBLIC_URL_ALLOWED_ORIGINS` set, a base is derived from the request only when BOTH hold:
+//   1. the `Host` header names a loopback interface (`localhost`, `127.0.0.0/8`, `[::1]`), AND
+//   2. the RAW SOCKET PEER is a loopback address — `req.socket.remoteAddress`, not `req.ip`.
+// (2) is the load-bearing half and it is deliberately NOT `req.ip`: `req.ip` is trustProxy-derived
+// and therefore XFF-influenced, i.e. the very thing being distrusted. The socket peer is observed
+// by the kernel and cannot be forged by any header. In the deployment described by SETUP.md the
+// peer is Traefik on the private Docker network (172.16/12 — private, not loopback), and for a
+// directly-exposed process it is the client's public IP; in both cases (2) is false and the
+// fallback is unreachable, so the only way to reach it is to be on the box talking to 127.0.0.1.
+// Both halves are also required at once, so `Host: 127.0.0.1` from a remote peer does not qualify.
+// SETUP.md already sets PUBLIC_URL in production, so production never depended on any of this.
+//
+// EVERYTHING ELSE FAILS LOUDLY. No silent root-relative downgrade: a relative `sources[].url` would
+// quietly break the cross-origin frontend (the site is thesupersuperanime.lol, the API is
+// api.thesupersuperanime.lol), which is precisely the "quietly wrong but safe" failure the fix is
+// forbidden to introduce. Startup dies with the variable to set; a live request that cannot resolve
+// a base logs and answers 500 naming it.
+
+/** Thrown by everything below. Route handlers turn it into a 500 whose body is `.message`. */
+export class PublicBaseError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'PublicBaseError';
+  }
+}
+
+/**
+ * Parse ONE configured base URL into the string that gets prefixed onto `/proxy?...`.
+ *
+ * Accepts `scheme://host[:port][/path]`, http(s) only, and strips trailing slashes so
+ * `https://a.example/` cannot produce `https://a.example//proxy`. A path prefix is kept (someone
+ * mounting behind `https://a.example/api` is legitimate). Userinfo, query and fragment are
+ * REJECTED rather than dropped — they mean the operator wrote something they did not intend, and
+ * silently repairing config is how a wrong origin ships.
+ *
+ * Returns null for empty/unset (the caller decides whether that is fatal), else
+ * `{ base, host, protocol }` where `host` is the canonical `host[:port]` with the default port for
+ * the scheme already removed — the form `matchesHostHeader` compares against.
+ */
+export const parsePublicBase = (raw, label = 'PUBLIC_URL') => {
+  const v = typeof raw === 'string' ? raw.trim() : '';
+  if (!v) return null;
+  let u;
+  try {
+    u = new URL(v);
+  } catch {
+    throw new PublicBaseError(`${label} is not an absolute URL: ${JSON.stringify(v)} (expected e.g. https://api.example.com)`);
+  }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:')
+    throw new PublicBaseError(`${label} must be http:// or https://, got ${JSON.stringify(u.protocol)}`);
+  if (!u.hostname) throw new PublicBaseError(`${label} has no host: ${JSON.stringify(v)}`);
+  if (u.username || u.password) throw new PublicBaseError(`${label} must not contain credentials: ${JSON.stringify(v)}`);
+  if (u.search || u.hash) throw new PublicBaseError(`${label} must not contain a query or fragment: ${JSON.stringify(v)}`);
+  return { base: `${u.origin}${u.pathname}`.replace(/\/+$/, ''), host: u.host, protocol: u.protocol };
+};
+
+/** Parse a comma-separated list of base URLs. Empty/unset → []. Each entry validated as above. */
+export const parsePublicBaseList = (raw, label = 'PUBLIC_URL_ALLOWED_ORIGINS') =>
+  (typeof raw === 'string' ? raw : '')
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean)
+    .map(s => parsePublicBase(s, label));
+
+/**
+ * Canonicalise a raw `Host` header to `host[:port]`, INTERPRETED UNDER `protocol` so the scheme's
+ * default port is dropped the same way `new URL().host` drops it in a configured origin. That is
+ * what makes `Host: a.example:443` match a configured `https://a.example`, and — deliberately —
+ * what stops it matching a configured `http://a.example`.
+ *
+ * Returns null unless the value is a BARE host. The rejections are the point, because "host" is a
+ * much smaller grammar than "URL" and every extra thing a URL can carry is a way to smuggle a
+ * different origin past a naive comparison:
+ *   - non-printable / non-ASCII bytes (a Host header is ASCII; IDN arrives as punycode)
+ *   - `/ \ ? #` — path, query and fragment markers, so `Host: a.example/../evil` cannot parse to
+ *     host `a.example` and quietly bring a path along
+ *   - `@` — userinfo, so `Host: trusted.example@evil.example` cannot be read as host
+ *     `trusted.example` by a human and `evil.example` by the parser
+ * Everything left is re-checked after parsing (no userinfo, no path, no query, no fragment) rather
+ * than trusted to the pre-filter, because the WHATWG parser deletes some characters instead of
+ * throwing — see REJECT, DO NOT SANITISE above.
+ */
+export const normaliseHostHeader = (rawHost, protocol = 'http:') => {
+  if (typeof rawHost !== 'string' || rawHost === '' || rawHost.length > 255) return null;
+  if (/[^\x21-\x7e]/.test(rawHost)) return null;
+  if (/[/\\?#@]/.test(rawHost)) return null;
+  let u;
+  try {
+    u = new URL(`${protocol}//${rawHost}`);
+  } catch {
+    return null;
+  }
+  if (u.username || u.password || u.search || u.hash) return null;
+  if (u.pathname !== '/' && u.pathname !== '') return null;
+  return u.host || null;
+};
+
+/** True when the raw `Host` header names a loopback interface. IPv6 arrives bracketed from URL. */
+export const isLoopbackHostHeader = rawHost => {
+  const host = normaliseHostHeader(rawHost, 'http:');
+  if (!host) return false;
+  const hostname = new URL(`http://${host}`).hostname.toLowerCase();
+  return hostname === 'localhost' || hostname === '[::1]' || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname);
+};
+
+/**
+ * True when a raw socket address is loopback. Node reports an IPv4 peer on a dual-stack listener as
+ * `::ffff:127.0.0.1`, which is why the mapped prefix is stripped before testing.
+ */
+export const isLoopbackAddress = addr => {
+  if (typeof addr !== 'string' || !addr) return false;
+  const a = addr.toLowerCase().replace(/^\[|\]$/g, '').replace(/^::ffff:/, '');
+  return a === '::1' || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(a);
+};
+
+/**
+ * Build the per-request base resolver. `publicUrl` is the default; `allowedOrigins` (already parsed)
+ * are additional origins a request's Host may select between, for a multi-name deployment.
+ *
+ * Resolution order — note that at no point is any part of a request header COPIED into the result:
+ *   1. an allowlisted origin whose host the request's Host header matches → that CONFIGURED origin
+ *   2. `publicUrl`, if set → that configured origin, whatever the Host said
+ *   3. the loopback dev fallback (both halves required; see the header) → `http://<loopback host>`
+ *   4. throw PublicBaseError
+ * The one string built from a header is (3), and it is a loopback literal by construction.
+ */
+export const createPublicBase = ({ publicUrl = null, allowedOrigins = [], envName = 'PUBLIC_URL' } = {}) => req => {
+  const rawHost = req?.headers?.host;
+  for (const cand of allowedOrigins) {
+    if (normaliseHostHeader(rawHost, cand.protocol) === cand.host) return cand.base;
+  }
+  if (publicUrl) return publicUrl.base;
+  // The request's Host is deliberately NOT quoted back in either message. It is attacker-controlled
+  // and these bodies are returned to the caller; the whole point of this module is that a header
+  // does not get to choose what we emit, and that includes emitting it inside an error string. The
+  // handlers log it (`{ err, host }`) where the operator who needs it can see it.
+  if (allowedOrigins.length)
+    throw new PublicBaseError(
+      `cannot build an absolute link: this request's Host is not in PUBLIC_URL_ALLOWED_ORIGINS and ` +
+        `${envName} is unset. Set ${envName} to this deployment's public origin, e.g. ` +
+        `${envName}=https://api.example.com, as the default for unmatched hosts.`
+    );
+  if (isLoopbackHostHeader(rawHost) && isLoopbackAddress(req?.socket?.remoteAddress))
+    return `http://${normaliseHostHeader(rawHost, 'http:')}`;
+  throw new PublicBaseError(
+    `cannot build an absolute link: ${envName} is not set and this request is not local. ` +
+      `Set ${envName} to this deployment's public origin, e.g. ${envName}=https://api.example.com`
+  );
+};
+
+/**
+ * Read the base config out of an env bag ONCE, at module load, and never throw while doing it.
+ *
+ * The non-throwing contract is deliberate: server.mjs and manga-routes.mjs both need this, ESM
+ * evaluates manga-routes.mjs BEFORE server.mjs's own top-level code, so a throw at import time
+ * would escape server.mjs's startup handler and surface as a raw stack trace instead of the
+ * one-line "set PUBLIC_URL=..." message that makes a misconfiguration self-explaining. Callers get
+ * `{ resolve, error, publicUrl, allowedOrigins }` and are expected to check `error` at startup.
+ */
+export const resolvePublicBaseEnv = (env = process.env) => {
+  let publicUrl = null;
+  let allowedOrigins = [];
+  let error = null;
+  try {
+    publicUrl = parsePublicBase(env.PUBLIC_URL, 'PUBLIC_URL');
+    allowedOrigins = parsePublicBaseList(env.PUBLIC_URL_ALLOWED_ORIGINS, 'PUBLIC_URL_ALLOWED_ORIGINS');
+  } catch (e) {
+    error = e;
+  }
+  const resolve = error
+    ? () => {
+        throw error;
+      }
+    : createPublicBase({ publicUrl, allowedOrigins });
+  return { resolve, error, publicUrl, allowedOrigins };
+};

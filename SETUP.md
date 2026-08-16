@@ -49,6 +49,16 @@ defaults cleanly. (A `pip install curl_cffi` + tiny wrapper works too if you'd
 rather not manage a binary.)
 
 ## 5. Run the API
+`PUBLIC_URL` below is **mandatory here, not decorative**. It is the origin baked into every
+`/proxy`, `/watch` and `/manga/image` link the API mints. Unset it and those routes answer `500`
+rather than deriving an origin from the request `Host` — that derivation was removed because a
+forged `Host` used to end up verbatim inside the links we hand out. A malformed value exits at
+startup with `anime-api: refusing to start — …` instead of listening.
+
+Note that the tunnel in step 6 points at `http://localhost:3000`, so the API's socket peer in this
+deployment *is* loopback; the only thing keeping the local-dev fallback dormant would be the public
+`Host` cloudflared forwards. Do not rely on that — set `PUBLIC_URL`.
+
 ```bash
 cd api
 PORT=3000 \

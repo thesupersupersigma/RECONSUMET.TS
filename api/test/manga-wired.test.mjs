@@ -66,8 +66,11 @@ before(async () => {
       // fake does is in-memory, so nothing legitimate can race these.
       MANGA_TIMEOUT_MS: '400',
       MANGA_READ_TIMEOUT_MS: '400',
-      // Unset so the img links must be derived from the REQUEST's host, which is what the deployed
-      // default does when PUBLIC_URL is not configured.
+      // Unset so the img links must be derived from the REQUEST rather than from config. This is
+      // the LOCAL-DEV path, not the deployed default: since the public-base fix, an unset
+      // PUBLIC_URL answers 500 unless the Host names a loopback interface AND the raw socket peer
+      // is loopback. This harness satisfies both (127.0.0.1 -> 127.0.0.1), which is exactly why it
+      // still exercises request-derived links. See "THE PUBLIC BASE" in src/validators.mjs.
       PUBLIC_URL: '',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
