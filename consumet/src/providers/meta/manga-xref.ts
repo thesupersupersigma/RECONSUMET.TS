@@ -80,6 +80,30 @@ const TTL_MISS_MS = 10 * 60 * 1000;
  */
 const TTL_ERROR_MS = 30 * 1000;
 
+/**
+ * BOUNDS ON AN UPSTREAM-SUPPLIED `Retry-After`.
+ *
+ * TTL_ERROR_MS above is this layer's own guess. When upstream states a back-off explicitly we
+ * should prefer its number — it is the only party that knows when its own limiter resets — but a
+ * header is attacker- and bug-supplied input and RFC 9110 §10.2.3 permits values this layer must
+ * not obey literally. Both bounds exist for a stated reason:
+ *
+ *   * FLOOR (1s). `Retry-After: 0`, a NEGATIVE delta, and an HTTP-date already in the past are all
+ *     things real servers send (a clock skew of a few seconds is enough on its own). Each of those
+ *     computes to "retry now", and retrying a 429 immediately is the single response guaranteed to
+ *     make a rate limit worse. One second is the smallest gap that is still a gap; concurrent
+ *     callers inside it are already collapsed by the in-flight map, not by the TTL.
+ *   * CAP (5 min). `Retry-After: 86400` is legal and a hostile or misconfigured upstream can send
+ *     anything. The cap is deliberately set BELOW TTL_MISS_MS (10 min): a refusal must never be
+ *     cached longer than a genuine, verified absence, because that would make "we could not find
+ *     out" stickier than "we looked and it is not there" — an exact inversion of this file's point.
+ *
+ * An absent, empty, or unparseable header is NOT clamped to anything; it falls through to
+ * TTL_ERROR_MS, because "upstream said nothing" and "upstream said zero" are different statements.
+ */
+const RETRY_AFTER_MIN_MS = 1000;
+const RETRY_AFTER_MAX_MS = 5 * 60 * 1000;
+
 /** Entries kept per cache. Small: one entry per series actually requested in the last few hours. */
 const CACHE_MAX = 500;
 
@@ -133,6 +157,15 @@ export interface IXrefFault {
   status?: number;
   /** Already-sanitised human-readable detail. Safe to log. */
   detail: string;
+  /**
+   * The back-off upstream ASKED FOR, in ms, already parsed and clamped to
+   * [RETRY_AFTER_MIN_MS, RETRY_AFTER_MAX_MS].
+   *
+   * ABSENT means upstream sent no usable `Retry-After` — NOT that it asked for zero. The cache
+   * falls back to TTL_ERROR_MS in that case, so the distinction is load-bearing and this field must
+   * stay optional rather than defaulted.
+   */
+  retryAfterMs?: number;
 }
 
 /**
@@ -152,16 +185,103 @@ export const xrefAnswer = <T>(value: T): IXrefResult<T> => ({ value, fault: null
 /** Upstream refused. `value` is only the degraded placeholder the legacy API returns. */
 export const xrefFault = <T>(value: T, fault: IXrefFault): IXrefResult<T> => ({ value, fault });
 
+/** Clamp a computed back-off into the band argued for above. Infinity clamps to the cap. */
+const clampRetryAfterMs = (ms: number): number =>
+  Math.min(RETRY_AFTER_MAX_MS, Math.max(RETRY_AFTER_MIN_MS, Math.round(ms)));
+
+/**
+ * Parse one `Retry-After` value into a clamped millisecond back-off, or null when it says nothing.
+ *
+ * RFC 9110 §10.2.3 gives the header TWO legal forms and both are in live use:
+ *   * `delta-seconds` — a non-negative integer, e.g. `Retry-After: 120`.
+ *   * `HTTP-date` — an IMF-fixdate, e.g. `Retry-After: Wed, 21 Oct 2015 07:28:00 GMT`.
+ *
+ * `Date.parse` IS FAR TOO LENIENT TO BE THE FALLBACK BRANCH, and both guards below were put in by
+ * a test that caught them:
+ *   * ORDER. `Date.parse('120')` is the YEAR 120 in V8, not NaN. Probing the date form first would
+ *     read `Retry-After: 120` as a moment ~1,900 years in the past and clamp it to the floor —
+ *     turning a two-minute back-off into a one-second one. Digits are matched first, always.
+ *   * THE LETTER GUARD. `Date.parse('12.5')` also succeeds (some day in the current year), so an
+ *     ILLEGAL numeric-ish value — `12.5`, `-5`, `1,5` — would likewise floor rather than fall back.
+ *     Every legal HTTP-date form (IMF-fixdate, RFC 850, asctime) names a weekday and a month, so a
+ *     value with no ASCII letter in it cannot be one and is rejected outright.
+ *
+ * Returns null (⇒ caller falls back to TTL_ERROR_MS) for an absent, empty or unparseable value —
+ * including the `Retry-After: Fri, 31 Dec 1999 …` and `Retry-After: soon` shapes a broken upstream
+ * emits. A parseable but absurd value is CLAMPED rather than rejected: upstream did state
+ * something, so honour the direction of it while refusing to be wedged by the magnitude.
+ */
+export const parseRetryAfterMs = (raw: unknown, now: number = Date.now()): number | null => {
+  // A fake adapter (and some HTTP stacks) hand back a number rather than the wire string.
+  if (typeof raw === 'number') return Number.isFinite(raw) ? clampRetryAfterMs(raw * 1000) : null;
+  if (typeof raw !== 'string') return null;
+  const value = raw.trim();
+  if (value === '') return null;
+  // delta-seconds. `Number` on an all-digit string is never NaN; an absurdly long one becomes
+  // Infinity, which clampRetryAfterMs takes to the cap — the desired outcome, not an error.
+  if (/^\d+$/.test(value)) return clampRetryAfterMs(Number(value) * 1000);
+  // No weekday and no month name ⇒ not an HTTP-date in any of its three forms. Falling back to
+  // TTL_ERROR_MS is strictly safer than letting Date.parse invent a timestamp from `12.5`.
+  if (!/[a-z]/i.test(value)) return null;
+  const when = Date.parse(value);
+  // A past date is legal-ish and common under clock skew; it clamps to the floor rather than
+  // being discarded, so "you may retry" is honoured without becoming "retry instantly".
+  return Number.isNaN(when) ? null : clampRetryAfterMs(when - now);
+};
+
+/**
+ * Pull `Retry-After` out of an axios response `headers`, case-insensitively.
+ *
+ * Axios hands back an `AxiosHeaders` instance on a real request (which has `.get()` AND own
+ * lowercased enumerable properties) but a plain object from a fake adapter, which may spell the
+ * key with any casing. Both are handled; neither is assumed.
+ */
+export const retryAfterFromHeaders = (headers: unknown, now?: number): number | null => {
+  if (!headers || typeof headers !== 'object') return null;
+  const bag = headers as Record<string, unknown> & { get?: (name: string) => unknown };
+  let raw: unknown;
+  if (typeof bag.get === 'function') {
+    try {
+      raw = bag.get('retry-after');
+    } catch {
+      raw = undefined;
+    }
+  }
+  if (raw === undefined || raw === null) {
+    const key = Object.keys(bag).find(k => k.toLowerCase() === 'retry-after');
+    if (key !== undefined) raw = bag[key];
+  }
+  // A repeated header arrives as an array; the first value is the one to obey.
+  if (Array.isArray(raw)) raw = raw[0];
+  return parseRetryAfterMs(raw, now);
+};
+
 /**
  * Classify a non-200 status. The caller has already peeled off whatever status means "no mapping"
  * for that endpoint (404 on MAL-Sync), so everything reaching here is a refusal by definition.
+ *
+ * Pass the response `headers` so an upstream-stated `Retry-After` sets the cache TTL instead of the
+ * flat TTL_ERROR_MS guess. Omitting them is safe and simply keeps the old behaviour.
+ *
+ * HONESTY NOTE ON MAL-SYNC SPECIFICALLY: nothing in this repo has ever observed MAL-Sync under
+ * throttle. Its 429 status code, and whether it sends `Retry-After` at all, are UNCONFIRMED — this
+ * is implemented against RFC 9110 and exercised by a scripted adapter, not against a live refusal.
  */
-export const faultForStatus = (status: number, source: string, detail?: string): IXrefFault => ({
-  kind: status === 429 ? 'rate-limited' : status >= 500 ? 'server-error' : 'unexpected-status',
-  source,
-  status,
-  detail: detail ?? `HTTP ${status}`,
-});
+export const faultForStatus = (
+  status: number,
+  source: string,
+  detail?: string,
+  headers?: unknown
+): IXrefFault => {
+  const retryAfterMs = retryAfterFromHeaders(headers);
+  return {
+    kind: status === 429 ? 'rate-limited' : status >= 500 ? 'server-error' : 'unexpected-status',
+    source,
+    status,
+    detail: detail ?? `HTTP ${status}`,
+    ...(retryAfterMs !== null ? { retryAfterMs } : {}),
+  };
+};
 
 /** Classify a thrown request. Timeouts and connection failures are indistinguishable to a caller. */
 export const faultForError = (err: unknown, source: string): IXrefFault => ({
@@ -171,7 +291,9 @@ export const faultForError = (err: unknown, source: string): IXrefFault => ({
 });
 
 /** One line describing a fault, for logs that must not assert "no mapping". */
-const faultLine = (fault: IXrefFault): string => `${fault.kind} (${fault.detail})`;
+const faultLine = (fault: IXrefFault): string =>
+  `${fault.kind} (${fault.detail})` +
+  (fault.retryAfterMs === undefined ? '' : `, upstream asked to retry after ${fault.retryAfterMs}ms`);
 
 // =============================================================================================
 // A TINY TTL CACHE WITH IN-FLIGHT DEDUPLICATION
@@ -189,9 +311,10 @@ const faultLine = (fault: IXrefFault): string => `${fault.kind} (${fault.detail}
  *
  * THE TTL IS CHOSEN FROM THE OUTCOME, NOT FROM THE VALUE. That distinction is the fix for the
  * cache-poisoning bug documented above: `isHit` only ever sees a value upstream actually vouched
- * for, because a faulted result takes TTL_ERROR_MS before `isHit` is consulted at all. 30 seconds
- * is deliberately kept rather than dropped to zero — retrying a 429 immediately is the one
- * response guaranteed to make a rate limit worse, and the window is short enough that a caller
+ * for, because a faulted result takes the error TTL before `isHit` is consulted at all. That error
+ * TTL is `fault.retryAfterMs` when upstream stated one and TTL_ERROR_MS otherwise; 30 seconds is
+ * deliberately kept as the fallback rather than dropped to zero — retrying a 429 immediately is the
+ * one response guaranteed to make a rate limit worse, and the window is short enough that a caller
  * that waits out one fan-out gets a real answer.
  */
 class TtlResultCache<K, V> {
@@ -207,8 +330,17 @@ class TtlResultCache<K, V> {
   /** Given a value upstream vouched for, is it a real record (TTL_HIT_MS) or a real absence? */
   constructor(private readonly isHit: (value: V) => boolean) {}
 
+  /**
+   * A faulted result is held for exactly as long as upstream ASKED to be left alone, and only falls
+   * back to this layer's TTL_ERROR_MS guess when upstream asked for nothing. `retryAfterMs` is
+   * already clamped at parse time, so no bound is re-applied here — one place owns the policy.
+   */
   private ttlFor = (result: IXrefResult<V>): number =>
-    result.fault ? TTL_ERROR_MS : this.isHit(result.value) ? TTL_HIT_MS : TTL_MISS_MS;
+    result.fault
+      ? result.fault.retryAfterMs ?? TTL_ERROR_MS
+      : this.isHit(result.value)
+        ? TTL_HIT_MS
+        : TTL_MISS_MS;
 
   get = async (key: K, load: () => Promise<IXrefResult<V>>): Promise<IXrefResult<V>> => {
     const cached = this.values.get(key);
@@ -529,20 +661,20 @@ export class MalSyncIndex {
     if (!Number.isFinite(malId) || malId <= 0) return xrefAnswer(null);
     return this.cache.get(malId, async () => {
       try {
-        const { data, status } = await this.client.get(`${this.baseUrl}/mal/manga/${malId}`, {
+        const { data, status, headers } = await this.client.get(`${this.baseUrl}/mal/manga/${malId}`, {
           // 404 is MAL-Sync's NORMAL "no mapping" answer, not a transport fault. Letting axios
           // throw on it would turn an ordinary miss into a logged bridge failure.
           validateStatus: () => true,
         });
         if (status === 404) return xrefAnswer(null);
         if (status !== 200) {
-          const fault = faultForStatus(status, 'malsync');
+          const fault = faultForStatus(status, 'malsync', undefined, headers);
           // NOT "treating as no mapping" — that was the conflation. We do not know whether a
           // mapping exists; we know only that MAL-Sync would not tell us.
           console.warn(
             `[manga-xref] MAL-Sync /mal/manga/${malId} answered HTTP ${status} — UNKNOWN whether a ` +
               `mapping exists (${faultLine(fault)}); the id bridge is skipped for now and this is ` +
-              `cached for ${TTL_ERROR_MS}ms only, NOT as a "no mapping" result`
+              `cached for ${fault.retryAfterMs ?? TTL_ERROR_MS}ms only, NOT as a "no mapping" result`
           );
           return xrefFault<IMalSyncPayload | null>(null, fault);
         }
@@ -737,7 +869,7 @@ export class MangaDexXref {
       .filter((id): id is string => id !== null && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id));
     if (ids.length === 0) return xrefAnswer(null);
 
-    const { data, status } = await this.client.get(`${this.baseUrl}/manga`, {
+    const { data, status, headers } = await this.client.get(`${this.baseUrl}/manga`, {
       // NOTE THE BARE KEYS. MangaDex wants `?ids[]=x&ids[]=y`, but axios appends the `[]` ITSELF
       // for any array-valued param — so writing the key as `'ids[]'` emits `ids[][]=x` and
       // MangaDex answers 400 for the whole request. Caught live: every MangaDex call in this file
@@ -752,7 +884,7 @@ export class MangaDexXref {
       validateStatus: () => true,
     });
     if (status !== 200) {
-      const fault = faultForStatus(status, 'mangadex');
+      const fault = faultForStatus(status, 'mangadex', undefined, headers);
       console.warn(
         `[manga-xref] MangaDex /manga?ids[] answered HTTP ${status} while verifying ${ids.length} ` +
           `MAL-Sync candidate(s) for AniList manga id ${anilistId} (${faultLine(fault)}) — falling back ` +
@@ -771,7 +903,7 @@ export class MangaDexXref {
     const probes = meta.titles.filter(t => typeof t === 'string' && t.trim() !== '').slice(0, TITLE_PROBES);
     let fault: IXrefFault | null = null;
     for (const title of probes) {
-      const { data, status } = await this.client.get(`${this.baseUrl}/manga`, {
+      const { data, status, headers } = await this.client.get(`${this.baseUrl}/manga`, {
         // Bare `contentRating` key for the same reason as in viaMalSync — axios adds the `[]`.
         params: {
           title,
@@ -781,7 +913,7 @@ export class MangaDexXref {
         validateStatus: () => true,
       });
       if (status !== 200) {
-        const probeFault = faultForStatus(status, 'mangadex');
+        const probeFault = faultForStatus(status, 'mangadex', undefined, headers);
         fault = fault ?? probeFault;
         console.warn(
           `[manga-xref] MangaDex /manga?title="${title}" answered HTTP ${status} for AniList manga id ` +
@@ -990,8 +1122,11 @@ export class MangaAliasResolver {
     if (!key) return xrefAnswer([]);
     return this.cache.get(key, async () => {
       let payload: any;
+      // AniList states its throttle window IN BAND (HTTP 200 + errors[]) as well as out of band,
+      // so the header is captured on the 200 path too — see the errors[] branch below.
+      let responseHeaders: unknown;
       try {
-        const { data, status } = await this.client.post(
+        const { data, status, headers } = await this.client.post(
           this.anilistUrl,
           { query: ALIAS_QUERY, variables: { search: query, perPage: ALIAS_CANDIDATES } },
           {
@@ -999,8 +1134,9 @@ export class MangaAliasResolver {
             validateStatus: () => true,
           }
         );
+        responseHeaders = headers;
         if (status !== 200) {
-          const fault = faultForStatus(status, 'anilist-alias');
+          const fault = faultForStatus(status, 'anilist-alias', undefined, headers);
           console.warn(
             `[manga-xref] AniList alias search for "${query}" answered HTTP ${status} — no aliases for ` +
               `this query (${faultLine(fault)}; an upstream fault, NOT "the series does not exist")`
@@ -1023,6 +1159,9 @@ export class MangaAliasResolver {
       // make, because [] was both the failure value and a legitimate answer.
       const errors = graphqlErrorsSummary(payload);
       if (errors) {
+        // AniList sends `Retry-After` alongside its in-band throttle error, so the 200 path gets the
+        // same treatment as a 429: obey the stated window, fall back to TTL_ERROR_MS if it is absent.
+        const retryAfterMs = retryAfterFromHeaders(responseHeaders);
         const fault: IXrefFault = {
           // AniList's throttle arrives as an in-band error, so an explicit rate-limit mention is
           // the only way to classify it; anything else is an unattributed upstream fault.
@@ -1030,6 +1169,7 @@ export class MangaAliasResolver {
           source: 'anilist-alias',
           status: 200,
           detail: `HTTP 200 with GraphQL errors: ${errors}`,
+          ...(retryAfterMs !== null ? { retryAfterMs } : {}),
         };
         console.error(
           `[manga-xref] AniList alias search for "${query}" returned HTTP 200 WITH errors — treating as ` +

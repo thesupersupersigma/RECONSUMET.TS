@@ -8,8 +8,10 @@ import {
   MalSyncIndex,
   MangaAliasResolver,
   MangaDexXref,
+  faultForError,
   pickSiteEntry,
   type IMalSyncSiteBinding,
+  type IXrefFault,
 } from './manga-xref';
 import type {
   IMangaIdBridge,
@@ -53,6 +55,136 @@ import type {
 const MAX_TITLES = 24;
 
 // =============================================================================================
+// THE FAULT CHANNEL — how a CALLER learns a bridge was skipped rather than answered
+//
+// WHAT WAS WRONG. ./manga-xref.ts already models "upstream refused" as a first-class value
+// (`IXrefResult.fault`), but every consumer in THIS file called the legacy `resolve()` / `lookup()`
+// surface, which is literally `(await …Result()).value`. So the typed vocabulary existed and
+// nothing consumed it: a caller of `createMangaMetadataLayer` still saw exactly one thing —
+// `null` — whether MAL-Sync had said "no such mapping" or had said nothing at all. The cache fix
+// from the previous pass was real and unreachable. This is the same shape as the pass before, where
+// working alias resolution was dead code because the provider was never registered.
+//
+// WHY THE FAULT IS OUT OF BAND, AND NOT IN THE RETURN VALUE. `IMangaIdBridge.lookup` returns
+// `Promise<string | null>` and `IMangaMetadataResolver.resolve` returns `Promise<IMangaMeta>`; both
+// are declared in ./manga-aggregator.ts, which this file imports only TYPES from (that is what
+// keeps the module graph acyclic). More importantly the aggregator's contract is deliberately
+// pessimistic — a THROWING bridge is caught and the candidate stays 'unverified', so that a bug can
+// never manufacture confidence. A transient 429 must land in exactly the same place: the bridge
+// still returns null, the provider's title search still runs, and the mapping is still labelled by
+// its own weaker evidence. Encoding the fault in the return value could only ever be an invitation
+// to promote on it. So the DEGRADED ANSWER IS UNCHANGED and the fault travels beside it.
+//
+// WHAT THAT BUYS, concretely: `/manga/info` for a series MAL-Sync happens to be throttled for now
+// serves the same honest 'unverified' mapping it always did, but the layer can also state WHY the
+// strong path did not run — which is the difference between "MangaHere genuinely is not in
+// MAL-Sync" (a durable fact, listed in PROVIDERS_WITHOUT_MALSYNC_COVERAGE-adjacent terms) and "we
+// could not find out for the next 30 seconds". Four fail-open providers survived to Phase 3 because
+// nothing in the system could say that sentence.
+// =============================================================================================
+
+/** Where in the layer a fault was hit. `bridge` events additionally carry `provider`. */
+export type MangaXrefFaultStage = 'metadata' | 'bridge';
+
+/** One upstream refusal, attributed to the layer component and lookup that hit it. */
+export interface IMangaXrefFaultEvent {
+  stage: MangaXrefFaultStage;
+  /** `'verified-metadata'`, or the bridge's `name` — `'mangadex-links.al'` / `'malsync'`. */
+  where: string;
+  /** The provider the bridge was asked about. Absent for `stage: 'metadata'`. */
+  provider?: string;
+  /** The AniList manga id under lookup, so an event can be correlated with a request. */
+  anilistId: string;
+  /** The typed refusal from ./manga-xref.ts, including any clamped `retryAfterMs`. */
+  fault: IXrefFault;
+  /** `Date.now()` when the event was raised. */
+  at: number;
+}
+
+/** Notified for every upstream refusal. MUST NOT throw; the layer guards it anyway. */
+export type MangaXrefFaultObserver = (event: IMangaXrefFaultEvent) => void;
+
+/** Events retained by {@link MangaXrefFaultLog}. Bounded so a sustained outage cannot grow memory. */
+const FAULT_LOG_MAX = 100;
+
+/**
+ * A bounded, pull-based record of upstream refusals, hung off the layer.
+ *
+ * TWO CHANNELS, DELIBERATELY. A push observer (`options.onXrefFault`) is what a caller wires when it
+ * wants to react — emit a metric, tag a response. This log is what a caller reads when it did NOT
+ * wire anything in advance, which is the normal case for a diagnostics endpoint and for a test.
+ * Requiring pre-registration to observe a fault would reproduce the original problem in a new place.
+ *
+ * It is NOT a health check and does not decide anything: nothing in this file reads it back.
+ */
+export class MangaXrefFaultLog {
+  private readonly events: IMangaXrefFaultEvent[] = [];
+  /** Total ever recorded, including events already evicted from the bounded window. */
+  total = 0;
+
+  record = (event: IMangaXrefFaultEvent): void => {
+    this.total++;
+    this.events.push(event);
+    if (this.events.length > FAULT_LOG_MAX) this.events.splice(0, this.events.length - FAULT_LOG_MAX);
+  };
+
+  /** The most recent events, oldest first. Defaults to the whole retained window. */
+  recent = (limit: number = FAULT_LOG_MAX): IMangaXrefFaultEvent[] =>
+    this.events.slice(Math.max(0, this.events.length - Math.max(0, limit)));
+
+  /** Every retained fault for one AniList manga id. The per-request question. */
+  forAnilistId = (anilistId: string | number): IMangaXrefFaultEvent[] => {
+    const key = String(anilistId);
+    return this.events.filter(e => e.anilistId === key);
+  };
+
+  /**
+   * Counts by `kind` and by `source` over the retained window, plus the longest back-off any
+   * upstream asked for. Enough for a diagnostics endpoint to say "MAL-Sync is throttling us" without
+   * re-deriving anything.
+   */
+  summary = () => {
+    const byKind: Record<string, number> = {};
+    const bySource: Record<string, number> = {};
+    let maxRetryAfterMs: number | undefined;
+    for (const e of this.events) {
+      byKind[e.fault.kind] = (byKind[e.fault.kind] ?? 0) + 1;
+      bySource[e.fault.source] = (bySource[e.fault.source] ?? 0) + 1;
+      if (e.fault.retryAfterMs !== undefined && (maxRetryAfterMs === undefined || e.fault.retryAfterMs > maxRetryAfterMs))
+        maxRetryAfterMs = e.fault.retryAfterMs;
+    }
+    return {
+      total: this.total,
+      retained: this.events.length,
+      byKind,
+      bySource,
+      ...(maxRetryAfterMs === undefined ? {} : { maxRetryAfterMs }),
+    };
+  };
+
+  clear = (): void => {
+    this.events.length = 0;
+    this.total = 0;
+  };
+}
+
+/**
+ * Call an observer without letting it become a new failure mode.
+ *
+ * A bridge that throws is caught by the aggregator and degrades the candidate to 'unverified' — so
+ * an observer throwing would silently DOWNGRADE matches, turning a diagnostics hook into a
+ * correctness bug. It is swallowed here instead.
+ */
+const notifyFault = (observer: MangaXrefFaultObserver | undefined, event: IMangaXrefFaultEvent): void => {
+  if (!observer) return;
+  try {
+    observer(event);
+  } catch (err) {
+    console.error(`[manga-metadata] an onXrefFault observer threw and was ignored: ${safeErrorString(err)}`);
+  }
+};
+
+// =============================================================================================
 // RESOLVER
 // =============================================================================================
 
@@ -73,6 +205,12 @@ export interface IVerifiedMangaMetadataResolverOptions {
    * AniList-keyed manga endpoint (verified live: `/anilist/manga/105778` → 404).
    */
   backfillMalId?: boolean;
+  /**
+   * Notified whenever an upstream on the cross-reference path REFUSED, as opposed to answering
+   * "nothing here". Optional; without it the layer's own {@link MangaXrefFaultLog} still records
+   * every event, so nothing is lost by not wiring this.
+   */
+  onXrefFault?: MangaXrefFaultObserver;
 }
 
 /**
@@ -100,6 +238,7 @@ export interface IVerifiedMangaMetadataResolverOptions {
 export class VerifiedMangaMetadataResolver implements IMangaMetadataResolver {
   private readonly enrichTitles: boolean;
   private readonly backfillMalId: boolean;
+  private readonly onXrefFault?: MangaXrefFaultObserver;
 
   constructor(
     /** B1's `AniListMangaMetadataResolver`, or any other AniList-speaking resolver. */
@@ -109,20 +248,56 @@ export class VerifiedMangaMetadataResolver implements IMangaMetadataResolver {
   ) {
     this.enrichTitles = options.enrichTitles ?? true;
     this.backfillMalId = options.backfillMalId ?? true;
+    this.onXrefFault = options.onXrefFault;
   }
 
   resolve = async (anilistId: string | number): Promise<IMangaMeta> => {
-    const meta = await this.base.resolve(anilistId);
+    let meta: IMangaMeta;
+    try {
+      meta = await this.base.resolve(anilistId);
+    } catch (err) {
+      // THE BASE RESOLVER IS NOT AN IXrefResult SURFACE. `AniListMangaMetadataResolver` (in
+      // ./manga-aggregator.ts) posts WITHOUT `validateStatus`, so a 429 or 5xx from AniList throws
+      // straight through here and out of the whole /manga/info call. That behaviour is unchanged —
+      // rethrown below — but it is no longer INVISIBLE: an AniList refusal now shows up in the same
+      // fault channel as a MangaDex or MAL-Sync one, which is the difference between diagnosing the
+      // outage and re-running a 13-agent investigation.
+      notifyFault(this.onXrefFault, {
+        stage: 'metadata',
+        where: 'anilist-base-resolver',
+        anilistId: String(anilistId),
+        fault: faultForError(err, 'anilist-metadata'),
+        at: Date.now(),
+      });
+      throw err;
+    }
 
     // No titles means AniList itself failed (its rate limiting is an HTTP 200 with a populated
     // errors[] and null data, which the base resolver already logs as an UPSTREAM fault). Spending
     // MangaDex and MAL-Sync requests on a series we know nothing about would turn one upstream
     // outage into three, and the aggregator is about to skip every provider anyway.
+    //
+    // KNOWN REMAINING CONFLATION, STATED RATHER THAN PAPERED OVER: an empty `titles` is ALSO what a
+    // genuinely unknown AniList id produces, and `AniListMangaMetadataResolver` discards the
+    // errors[] it detected (it logs, then returns the same empty shape). So this one branch cannot
+    // raise a fault event — the information is destroyed upstream of this file, in
+    // ./manga-aggregator.ts, which this item does not own. Fixing it means having that resolver
+    // return an IXrefResult-shaped answer or accept an observer of its own.
     if (!Array.isArray(meta.titles) || meta.titles.length === 0) return meta;
 
     let record;
     try {
-      record = await this.xref.resolve(meta);
+      // `resolveResult`, not `resolve`: the fault is the reason this method exists in the pair.
+      const result = await this.xref.resolveResult(meta);
+      if (result.fault)
+        notifyFault(this.onXrefFault, {
+          stage: 'metadata',
+          where: 'verified-metadata',
+          anilistId: meta.anilistId,
+          fault: result.fault,
+          at: Date.now(),
+        });
+      record = result.value;
     } catch (err) {
       // MangaDexXref already swallows its own errors; this is belt-and-braces so a metadata
       // resolver can never be the reason a whole /manga/info call fails.
@@ -130,6 +305,13 @@ export class VerifiedMangaMetadataResolver implements IMangaMetadataResolver {
         `[manga-metadata] MangaDex cross-reference threw for AniList manga id ${meta.anilistId} ` +
           `(continuing with AniList-only metadata): ${safeErrorString(err)}`
       );
+      notifyFault(this.onXrefFault, {
+        stage: 'metadata',
+        where: 'verified-metadata',
+        anilistId: meta.anilistId,
+        fault: faultForError(err, 'mangadex'),
+        at: Date.now(),
+      });
       return meta;
     }
     if (!record) return meta;
@@ -214,12 +396,35 @@ export class MangaDexLinksBridge implements IMangaIdBridge {
   constructor(
     private readonly xref: MangaDexXref,
     /** Provider name to answer for. Matched case-insensitively against `MangaParser.name`. */
-    private readonly providerName: string = 'MangaDex'
+    private readonly providerName: string = 'MangaDex',
+    /** Notified when MangaDex (or MAL-Sync on its path) refused. See the fault-channel section. */
+    private readonly onXrefFault?: MangaXrefFaultObserver
   ) {}
 
   lookup = async (meta: IMangaMeta, providerName: string): Promise<string | null> => {
     if (String(providerName).toLowerCase() !== this.providerName.toLowerCase()) return null;
-    const record = await this.xref.resolve(meta);
+    const result = await this.xref.resolveResult(meta);
+    if (result.fault) {
+      // THE ANSWER IS UNCHANGED — null, so the aggregator falls through to title matching and the
+      // candidate is labelled by its own weaker evidence. Only the EXPLANATION is new. Returning
+      // anything else here, or throwing, would either fabricate confidence or destroy the degraded
+      // answer, and both are worse than the bug being fixed.
+      console.warn(
+        `[manga-metadata] mangadex-links.al bridge SKIPPED for AniList manga id ${meta.anilistId} → ` +
+          `${providerName}: upstream refused (${result.fault.kind} from ${result.fault.source}: ` +
+          `${result.fault.detail}) — this is NOT "MangaDex has no record for this series"; falling ` +
+          `back to title matching, and the mapping keeps its weaker confidence label`
+      );
+      notifyFault(this.onXrefFault, {
+        stage: 'bridge',
+        where: this.name,
+        provider: String(providerName),
+        anilistId: meta.anilistId,
+        fault: result.fault,
+        at: Date.now(),
+      });
+    }
+    const record = result.value;
     if (!record) return null;
     console.warn(
       `[manga-metadata] mangadex-links.al bridged AniList manga id ${meta.anilistId} → MangaDex ` +
@@ -252,7 +457,9 @@ export class MalSyncBridge implements IMangaIdBridge {
 
   constructor(
     private readonly index: MalSyncIndex,
-    private readonly bindings: readonly IMalSyncSiteBinding[] = MALSYNC_SITE_BINDINGS
+    private readonly bindings: readonly IMalSyncSiteBinding[] = MALSYNC_SITE_BINDINGS,
+    /** Notified when MAL-Sync refused. See the fault-channel section at the top of this file. */
+    private readonly onXrefFault?: MangaXrefFaultObserver
   ) {}
 
   /** The binding for a provider, or undefined when MAL-Sync does not cover it. */
@@ -264,8 +471,32 @@ export class MalSyncBridge implements IMangaIdBridge {
     if (!binding) return null; // uncovered provider — no request
     if (!meta.malId) return null; // no key to look up with — no request; see limit (1) above
 
-    const payload = await this.index.lookup(meta.malId);
-    const entries = this.index.entriesForSite(payload, binding.site);
+    // `lookupResult`, not `lookup`. The legacy `lookup` is literally `(await lookupResult()).value`,
+    // which is exactly where the distinction was being thrown away: MAL-Sync's genuine 404 ("this
+    // series is in no site map") and MAL-Sync's 429 ("ask me later") both arrived here as `null`,
+    // produced zero entries, and returned the same silent null.
+    const result = await this.index.lookupResult(meta.malId);
+    if (result.fault) {
+      console.warn(
+        `[manga-metadata] malsync bridge SKIPPED for AniList manga id ${meta.anilistId} → ` +
+          `${binding.provider} (malId ${meta.malId}): MAL-Sync refused (${result.fault.kind} from ` +
+          `${result.fault.source}: ${result.fault.detail}) — UNKNOWN whether ${binding.site} lists ` +
+          `this series; falling back to title matching with the mapping's weaker confidence label ` +
+          `intact. This is NOT the same as ${binding.provider} having no MAL-Sync coverage.`
+      );
+      notifyFault(this.onXrefFault, {
+        stage: 'bridge',
+        where: this.name,
+        provider: String(providerName),
+        anilistId: meta.anilistId,
+        fault: result.fault,
+        at: Date.now(),
+      });
+      // Same degraded answer as before. See MangaDexLinksBridge for why it must stay null.
+      return null;
+    }
+
+    const entries = this.index.entriesForSite(result.value, binding.site);
     if (entries.length === 0) return null;
 
     const entry = pickSiteEntry(entries, meta, `${binding.site} (→ ${binding.provider})`);
@@ -318,6 +549,18 @@ export interface IMangaMetadataLayer {
    * `MangaKakalot.setAliasResolver`) should be handed this instance rather than building its own.
    */
   aliases: MangaAliasResolver;
+  /**
+   * EVERY UPSTREAM REFUSAL THE LAYER HIT, readable without having wired anything up front.
+   *
+   * This is the consumable end of ./manga-xref.ts's fault vocabulary, and the answer to "how does a
+   * caller tell a bridge that was SKIPPED from a bridge that answered 'no such mapping'?" — both
+   * still produce a null id and an honest, degraded mapping; only the skipped one appears here.
+   *
+   * Read `faults.forAnilistId(id)` after a `/manga/info` call to explain that call, or
+   * `faults.summary()` for a diagnostics endpoint. A rising `byKind['rate-limited']` is an outage;
+   * an empty log while mappings come back 'unverified' means the bridges really did look.
+   */
+  faults: MangaXrefFaultLog;
 }
 
 export interface IMangaMetadataLayerOptions extends IVerifiedMangaMetadataResolverOptions {
@@ -329,6 +572,11 @@ export interface IMangaMetadataLayerOptions extends IVerifiedMangaMetadataResolv
   aniListApiUrl?: string;
   /** Override the site→provider bindings. */
   bindings?: readonly IMalSyncSiteBinding[];
+  /**
+   * Reuse an existing fault log instead of the fresh one the factory would build. Useful when
+   * several layers should report into one diagnostics surface; unnecessary otherwise.
+   */
+  faultLog?: MangaXrefFaultLog;
 }
 
 /**
@@ -359,13 +607,24 @@ export const createMangaMetadataLayer = (
 ): IMangaMetadataLayer => {
   const malsync = new MalSyncIndex(client, options.malSyncBaseUrl);
   const xref = new MangaDexXref(client, malsync, options.mangaDexApiUrl);
+  const faults = options.faultLog ?? new MangaXrefFaultLog();
+  // ONE observer, fanned to both channels. The log always records (so a caller that wired nothing
+  // can still find out); the caller's own observer, if any, runs after and cannot suppress the log.
+  const onXrefFault: MangaXrefFaultObserver = event => {
+    faults.record(event);
+    notifyFault(options.onXrefFault, event);
+  };
   return {
-    metadata: new VerifiedMangaMetadataResolver(base, xref, options),
-    bridges: [new MangaDexLinksBridge(xref), new MalSyncBridge(malsync, options.bindings)],
+    metadata: new VerifiedMangaMetadataResolver(base, xref, { ...options, onXrefFault }),
+    bridges: [
+      new MangaDexLinksBridge(xref, 'MangaDex', onXrefFault),
+      new MalSyncBridge(malsync, options.bindings, onXrefFault),
+    ],
     xref,
     malsync,
     // Same client, same MalSyncIndex — so an alias lookup reuses whatever the bridges already cached.
     aliases: new MangaAliasResolver(client, malsync, options.aniListApiUrl),
+    faults,
   };
 };
 
@@ -374,7 +633,11 @@ export const createMangaMetadataLayer = (
  * evidence. The coverage limits are DOCUMENTED here rather than solved, which is the accepted
  * position: MAL-Sync's site list simply does not cover most of this repo's providers.
  */
-export const describeMangaMetadataLayer = (bindings: readonly IMalSyncSiteBinding[] = MALSYNC_SITE_BINDINGS) => ({
+export const describeMangaMetadataLayer = (
+  bindings: readonly IMalSyncSiteBinding[] = MALSYNC_SITE_BINDINGS,
+  /** Pass `layer.faults` to include the live refusal picture. Omitted ⇒ the static description only. */
+  faults?: MangaXrefFaultLog
+) => ({
   canonicalIdSpace: 'AniList Media(type: MANGA)',
   verifier: 'MangaDex attributes.links.al (a hard external id asserted on the record)',
   bridges: [
@@ -397,6 +660,14 @@ export const describeMangaMetadataLayer = (bindings: readonly IMalSyncSiteBindin
       'exists on its own site before returning it. MangaKakalot confirms against its sitemap index ' +
       'or a bounded number of direct /manga/<slug> fetches.',
   },
+  /**
+   * "A BRIDGE DID NOT FIRE" HAS TWO CAUSES AND THEY LOOK IDENTICAL FROM OUTSIDE. The static lists
+   * below (`malSyncUnmappedSites`, `providersWithoutMalSyncCoverage`) cover the FIRST — structural,
+   * permanent, expected. This covers the second — upstream refused, transient, and until this item
+   * it was invisible to every caller because `lookup()`/`resolve()` returned the same `null` for
+   * both. A non-empty `byKind` here means at least one bridge was skipped rather than answered.
+   */
+  xrefFaults: faults ? faults.summary() : null,
   malSyncUnmappedSites: MALSYNC_UNMAPPED_SITES.map(s => ({ ...s })),
   providersWithoutMalSyncCoverage: [...PROVIDERS_WITHOUT_MALSYNC_COVERAGE],
   caveats: [
