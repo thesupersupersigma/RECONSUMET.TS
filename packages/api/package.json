@@ -1,6 +1,7 @@
 {
   "name": "@reconsumet/api",
-  "version": "0.4.1",
+  "version": "0.4.2",
+  "private": true,
   "description": "RECONSUMΣT.TS HTTP API (Hono + OpenAPI) and scheduled jobs",
   "license": "GPL-3.0-or-later",
   "author": "thesupersupersigma",

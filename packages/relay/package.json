@@ -1,6 +1,7 @@
 {
   "name": "@reconsumet/relay",
-  "version": "0.4.1",
+  "version": "0.4.2",
+  "private": true,
   "description": "RECONSUMΣT.TS video/subtitle relay: sealed tokens, HLS rewriting, bandwidth limits",
   "license": "GPL-3.0-or-later",
   "author": "thesupersupersigma",

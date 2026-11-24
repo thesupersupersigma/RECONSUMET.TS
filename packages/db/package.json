@@ -1,6 +1,7 @@
 {
   "name": "@reconsumet/db",
-  "version": "0.4.1",
+  "version": "0.4.2",
+  "private": true,
   "description": "RECONSUMΣT.TS Postgres storage: schema, migrations, catalog/mapping/cache stores",
   "license": "GPL-3.0-or-later",
   "author": "thesupersupersigma",

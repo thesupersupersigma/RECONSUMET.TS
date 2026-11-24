@@ -1,6 +1,6 @@
 {
   "name": "reconsumet",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "private": true,
   "description": "Self-hostable anime aggregator: scraping library + HTTP API with an HLS/subtitle proxy",
   "license": "GPL-3.0-or-later",
@@ -21,7 +21,8 @@
     "test:live": "pnpm -r test:live",
     "lint": "biome check .",
     "typecheck": "pnpm -r typecheck",
-    "reconsumet": "node packages/core/src/cli/index.ts"
+    "reconsumet": "node packages/core/src/cli/index.ts",
+    "test:pack": "pnpm --filter @reconsumet/client test:pack"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.6.8"

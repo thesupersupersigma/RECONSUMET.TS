@@ -1,6 +1,6 @@
 {
   "name": "@reconsumet/core",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "RECONSUMΣT.TS core: fetch layer, anime catalog, AniList client, sources and AniList→source matching",
   "license": "GPL-3.0-or-later",
   "author": "thesupersupersigma",
@@ -12,7 +12,8 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "!dist/**/*.map"
   ],
   "engines": {
     "node": ">=26"
@@ -35,5 +36,25 @@
   },
   "bin": {
     "reconsumet": "./dist/cli/index.js"
+  },
+  "keywords": [
+    "anime",
+    "scraper",
+    "consumet",
+    "hls",
+    "anilist",
+    "streaming"
+  ],
+  "homepage": "https://github.com/thesupersupersigma/RECONSUMET.TS/tree/master/packages/core#readme",
+  "bugs": {
+    "url": "https://github.com/thesupersupersigma/RECONSUMET.TS/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thesupersupersigma/RECONSUMET.TS.git",
+    "directory": "packages/core"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

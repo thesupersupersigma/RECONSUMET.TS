@@ -27,8 +27,8 @@ docker compose exec api node dist/cli.js keys create mysite   # an API key for y
 
 Instead of building, you can use the prebuilt multi-arch images (`linux/amd64`, `linux/arm64`):
 `docker compose pull && docker compose up -d`. They are `ghcr.io/thesupersupersigma/reconsumet-api` and
-`ghcr.io/thesupersupersigma/reconsumet-relay`, tagged with the version (`0.4.1`) and `latest`. Pin a version with
-`RECONSUMET_VERSION=0.4.1` in `.env`.
+`ghcr.io/thesupersupersigma/reconsumet-relay`, tagged with the version (`0.4.2`) and `latest`. Pin a version with
+`RECONSUMET_VERSION=0.4.2` in `.env`.
 
 The API applies its database migrations on every start, then imports the anime catalog within a minute (about
 30 seconds). By default both services listen on `127.0.0.1` only (`API_PORT` 8080, `RELAY_PORT` 8081). Set

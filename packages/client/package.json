@@ -1,7 +1,7 @@
 {
   "name": "@reconsumet/client",
-  "version": "0.4.1",
-  "description": "Typed client for the RECONSUMΣT.TS API (Hono RPC + zod schemas)",
+  "version": "0.4.2",
+  "description": "Typed client for a RECONSUMΣT.TS API server (Hono RPC)",
   "license": "GPL-3.0-or-later",
   "author": "thesupersupersigma",
   "type": "module",
@@ -12,7 +12,8 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "!dist/**/*.map"
   ],
   "engines": {
     "node": ">=26"
@@ -20,15 +21,36 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:pack": "node scripts/test-pack.mjs"
   },
   "dependencies": {
-    "@reconsumet/api": "workspace:*",
     "hono": "^4.13.21"
   },
   "devDependencies": {
+    "@reconsumet/api": "workspace:*",
     "@types/node": "^26.6.6",
     "typescript": "^7.0.2",
     "vitest": "^5.1.1"
+  },
+  "keywords": [
+    "anime",
+    "api-client",
+    "hono",
+    "typed",
+    "consumet",
+    "anilist"
+  ],
+  "homepage": "https://github.com/thesupersupersigma/RECONSUMET.TS/tree/master/packages/client#readme",
+  "bugs": {
+    "url": "https://github.com/thesupersupersigma/RECONSUMET.TS/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thesupersupersigma/RECONSUMET.TS.git",
+    "directory": "packages/client"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }
