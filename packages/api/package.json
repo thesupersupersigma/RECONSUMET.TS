@@ -1,0 +1,49 @@
+{
+  "name": "@reconsumet/api",
+  "version": "0.3.0",
+  "description": "RECONSUMΣT.TS HTTP API (Hono + OpenAPI) and scheduled jobs",
+  "license": "GPL-3.0-or-later",
+  "author": "thesupersupersigma",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./schemas": {
+      "types": "./dist/schemas.d.ts",
+      "default": "./dist/schemas.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=26"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:live": "vitest run --config vitest.live.config.ts",
+    "start": "node dist/main.js"
+  },
+  "dependencies": {
+    "@reconsumet/core": "workspace:*",
+    "@reconsumet/db": "workspace:*",
+    "hono": "^4.13.21",
+    "@hono/node-server": "^2.1.11",
+    "@hono/zod-openapi": "^1.6.3",
+    "@hono/swagger-ui": "^0.6.2",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.1",
+    "@electric-sql/pglite": "^0.6.0"
+  },
+  "bin": {
+    "reconsumet-api": "./dist/cli.js"
+  }
+}
