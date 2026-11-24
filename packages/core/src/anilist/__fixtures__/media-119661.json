@@ -1,0 +1,125 @@
+{
+ "data": {
+  "Media": {
+   "id": 119661,
+   "idMal": 42203,
+   "title": {
+    "romaji": "Re:Zero kara Hajimeru Isekai Seikatsu 2nd Season Part 2",
+    "english": "Re:ZERO -Starting Life in Another World- Season 2 Part 2",
+    "native": "Re:ゼロから始める異世界生活 2nd Season Part 2"
+   },
+   "synonyms": [
+    "Re:Zero kara Hajimeru Isekai Seikatsu (2021)",
+    "Re: 제로부터 시작하는 이세계 생활 2기 파트 2",
+    "Re:从零开始的异世界生活第二季（下半）",
+    "Re:从零开始的异世界生活 2 下半",
+    "Re:Zero รีเซทชีวิต ฝ่าวิกฤตต่างโลก ภาค 2 พาร์ท 2",
+    "Re:Zero — жизнь с нуля в другом мире. Второй сезон"
+   ],
+   "format": "TV",
+   "episodes": 12,
+   "status": "FINISHED",
+   "season": "WINTER",
+   "seasonYear": 2021,
+   "startDate": {
+    "year": 2021,
+    "month": 1,
+    "day": 6
+   },
+   "endDate": {
+    "year": 2021,
+    "month": 3,
+    "day": 24
+   },
+   "duration": 30,
+   "coverImage": {
+    "large": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx119661-GDbUZxrZMz01.png"
+   },
+   "nextAiringEpisode": null,
+   "relations": {
+    "edges": [
+     {
+      "relationType": "PREQUEL",
+      "node": {
+       "id": 108632,
+       "type": "ANIME",
+       "format": "TV",
+       "episodes": 13,
+       "status": "FINISHED",
+       "seasonYear": 2020,
+       "title": {
+        "romaji": "Re:Zero kara Hajimeru Isekai Seikatsu 2nd Season",
+        "english": "Re:ZERO -Starting Life in Another World- Season 2",
+        "native": "Re:ゼロから始める異世界生活 2nd Season"
+       }
+      }
+     },
+     {
+      "relationType": "ADAPTATION",
+      "node": {
+       "id": 85737,
+       "type": "MANGA",
+       "format": "NOVEL",
+       "episodes": null,
+       "status": "RELEASING",
+       "seasonYear": null,
+       "title": {
+        "romaji": "Re:Zero kara Hajimeru Isekai Seikatsu",
+        "english": "Re:ZERO -Starting Life in Another World-",
+        "native": "Re:ゼロから始める異世界生活"
+       }
+      }
+     },
+     {
+      "relationType": "ALTERNATIVE",
+      "node": {
+       "id": 112218,
+       "type": "MANGA",
+       "format": "MANGA",
+       "episodes": null,
+       "status": "RELEASING",
+       "seasonYear": null,
+       "title": {
+        "romaji": "Re:Zero kara Hajimeru Isekai Seikatsu: Dai-4 Shou - Seiiki to Gouyoku no Majo",
+        "english": "Re:ZERO -Starting Life in Another World- Chapter 4: The Sanctuary and the Witch of Greed",
+        "native": "Re:ゼロから始める異世界生活 第四章 聖域と強欲の魔女"
+       }
+      }
+     },
+     {
+      "relationType": "SPIN_OFF",
+      "node": {
+       "id": 128306,
+       "type": "ANIME",
+       "format": "ONA",
+       "episodes": 12,
+       "status": "FINISHED",
+       "seasonYear": 2021,
+       "title": {
+        "romaji": "Re:Zero kara Hajimeru Kyuukei Jikan (Break Time) 2nd Season Part 2",
+        "english": null,
+        "native": "Re:ゼロから始める休憩時間(ブレイクタイム) 2nd Season Part 2"
+       }
+      }
+     },
+     {
+      "relationType": "SEQUEL",
+      "node": {
+       "id": 163134,
+       "type": "ANIME",
+       "format": "TV",
+       "episodes": 16,
+       "status": "FINISHED",
+       "seasonYear": 2024,
+       "title": {
+        "romaji": "Re:Zero kara Hajimeru Isekai Seikatsu 3rd Season",
+        "english": "Re:ZERO -Starting Life in Another World- Season 3",
+        "native": "Re:ゼロから始める異世界生活 3rd season"
+       }
+      }
+     }
+    ]
+   }
+  }
+ }
+}

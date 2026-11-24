@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // `reconsumet` — dev/test CLI for the library. Data lives in RECONSUMET_DATA_DIR (default ./data).
 import { parseArgs } from 'node:util'
+import { ANILIST_HOST_RULE, createAniList } from '../anilist/client.ts'
 import { FileCatalogStore } from '../catalog/file-store.ts'
 import { updateOfflineDb } from '../catalog/offline-db.ts'
 import { dataDir } from '../data.ts'
@@ -11,6 +12,7 @@ const HELP = `reconsumet — RECONSUMΣT.TS dev CLI
 Usage:
   reconsumet catalog update [--force]       import the anime offline database (skips if unchanged)
   reconsumet catalog search <query>         search the local catalog
+  reconsumet anilist sync                   merge AniList's airing / upcoming / recently updated into the catalog
 
 Options:
   --json        machine-readable output
@@ -18,7 +20,8 @@ Options:
   -h, --help    this help
 
 Environment:
-  RECONSUMET_DATA_DIR   data dir (default ./data)`
+  RECONSUMET_DATA_DIR            data dir (default ./data)
+  RECONSUMET_ANILIST_DAILY_CAP   AniList requests per UTC day (default 300)`
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
@@ -36,15 +39,22 @@ const out = (v: unknown) => console.log(values.json ? JSON.stringify(v, null, 2)
 async function main() {
   if (values.help || !cmd) return console.log(HELP)
   const fetcher = createFetcher({
+    rules: [ANILIST_HOST_RULE],
     onEvent: values.verbose
       ? (e) => console.error(`${e.tier} ${e.status ?? e.error} ${e.ms}ms ${e.url.slice(0, 120)}`)
       : undefined,
   })
   const catalog = new FileCatalogStore(dataDir())
+  const anilist = createAniList({ fetcher, dir: dataDir() })
   try {
     if (cmd === 'catalog' && sub === 'update') {
       const r = await updateOfflineDb(fetcher, catalog, { force: values.force })
       out(r.skipped ? { skipped: true, reason: 'release unchanged', ...r.meta } : { imported: true, ...r.meta })
+      return
+    }
+    if (cmd === 'anilist' && sub === 'sync') {
+      const r = await anilist.sync(catalog)
+      out({ ...r, usage: await anilist.usage(), catalogEntries: await catalog.count() })
       return
     }
     if (cmd === 'catalog' && sub === 'search') {
