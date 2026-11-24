@@ -2,7 +2,7 @@
 import { setTimeout as sleep } from 'node:timers/promises'
 
 /** Largest piece sent per bucket check, so a big upstream chunk can't burst past the rate. */
-const CHUNK = 16 * 1024
+const CHUNK = 64 * 1024
 const IDLE_MS = 60_000
 
 /** Token bucket in bytes, refilled continuously, burst = 1 s of rate. */
@@ -85,7 +85,12 @@ export function createLimits(opts: LimitOptions) {
     },
 
     /** Throttles and counts `body`; calls `release` once it ends, fails or the client cancels it. */
-    pipe(ip: string, body: ReadableStream<Uint8Array>, release: () => void): ReadableStream<Uint8Array> {
+    pipe(
+      ip: string,
+      body: ReadableStream<Uint8Array>,
+      release: () => void,
+      onError: (e: unknown) => void = () => {},
+    ): ReadableStream<Uint8Array> {
       const bucket = peer(ip).bucket
       const reader = body.getReader()
       let ended = false
@@ -119,6 +124,7 @@ export function createLimits(opts: LimitOptions) {
             } catch (e) {
               if (ended) return
               end()
+              onError(e)
               c.error(e)
             }
           },

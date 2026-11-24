@@ -158,7 +158,12 @@ export function createRelay(config: RelayConfig, deps: RelayDeps = {}) {
       await res.body.cancel()
       return new Response(null, { status: res.status, headers })
     }
-    return new Response(limits.pipe(ip, res.body.stream(), release), { status: res.status, headers })
+    // headers are out already: a failure mid-body can only cut the connection, so at least count + log it
+    const failed = (e: unknown) => {
+      bump(upstreamErrors, new URL(t.u).hostname)
+      console.warn(`relay: upstream body failed (${new URL(t.u).hostname}, ${t.k}): ${(e as Error)?.name}`)
+    }
+    return new Response(limits.pipe(ip, res.body.stream(), release, failed), { status: res.status, headers })
   }
 
   const app = new Hono()
