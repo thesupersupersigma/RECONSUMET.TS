@@ -60,3 +60,6 @@ _*.txt
 
 # Untouched upstream source, kept for reference only
 /_reference/
+
+# Generated tool output
+/out/
