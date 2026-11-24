@@ -46,9 +46,19 @@ export function parseTitle(raw: string): TitleInfo {
   return info
 }
 
-/** Sørensen–Dice similarity on character bigrams of the normalized bases (0..1). */
+/**
+ * Sørensen–Dice similarity on character bigrams of the normalized bases (0..1), or 0.8 when every word of the shorter
+ * base appears in the longer one ("gintama" vs "gintama porori hen"): AniDB-style titles drop the arc name.
+ */
 export function similarity(a: string, b: string): number {
   if (a === b) return 1
+  const [short, long] = a.length <= b.length ? [a, b] : [b, a]
+  const words = new Set(long.split(' '))
+  const subset = short.length >= 4 && short.split(' ').every((w) => words.has(w)) ? 0.8 : 0
+  return Math.max(subset, dice(a, b))
+}
+
+function dice(a: string, b: string): number {
   if (a.length < 2 || b.length < 2) return 0
   const grams = new Map<string, number>()
   for (let i = 0; i < a.length - 1; i++) {

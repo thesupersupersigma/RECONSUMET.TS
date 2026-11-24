@@ -5,6 +5,7 @@ import { createAniList } from '../anilist/client.ts'
 import { FileCatalogStore } from '../catalog/file-store.ts'
 import { updateOfflineDb } from '../catalog/offline-db.ts'
 import { dataDir } from '../data.ts'
+import { createMatcher } from '../match/index.ts'
 import { createSources, getSourceDefinition } from '../sources/registry.ts'
 import type { Source } from '../sources/types.ts'
 
@@ -16,8 +17,16 @@ Usage:
   reconsumet anilist sync                   merge AniList's airing / upcoming / recently updated into the catalog
   reconsumet search <source> <query>        search one source (reanime, anizone)
   reconsumet health                         is each source up and unblocked?
+  reconsumet match <anilistId> [--source s] [--refresh]
+                                            which show + episode offset on each source
+  reconsumet streams <anilistId> <episode> [--source s] [--dub] [--json]
+                                            playable streams + subtitles (first source that has them)
 
 Options:
+  -s, --source  one source instead of all (in preference order: reanime, anizone)
+  --dub         English audio instead of Japanese with subtitles
+  --refresh     ignore the cached mapping
+  --force       re-import even if the release is unchanged
   --json        machine-readable output
   -v, --verbose log every HTTP request to stderr
   -h, --help    this help
@@ -30,6 +39,9 @@ const { values, positionals } = parseArgs({
   allowPositionals: true,
   options: {
     force: { type: 'boolean' },
+    source: { type: 'string', short: 's' },
+    dub: { type: 'boolean' },
+    refresh: { type: 'boolean' },
     json: { type: 'boolean' },
     verbose: { type: 'boolean', short: 'v' },
     help: { type: 'boolean', short: 'h' },
@@ -38,6 +50,10 @@ const { values, positionals } = parseArgs({
 
 const [cmd, sub, ...rest] = positionals
 const out = (v: unknown) => console.log(values.json ? JSON.stringify(v, null, 2) : v)
+const anilistIdArg = (s: string | undefined) => {
+  if (!s || !/^\d+$/.test(s)) throw new Error(`expected an AniList ID, got "${s ?? ''}"`)
+  return Number(s)
+}
 
 async function main() {
   if (values.help || !cmd) return console.log(HELP)
@@ -48,6 +64,7 @@ async function main() {
   })
   const catalog = new FileCatalogStore(dataDir())
   const anilist = createAniList({ fetcher, dir: dataDir() })
+  const matcher = createMatcher({ media: anilist.media, catalog, dir: dataDir() })
   const source = (id: string | undefined) => {
     if (!id) throw new Error(`which source? (${[...sources.keys()].join(', ')})`)
     getSourceDefinition(id)
@@ -70,6 +87,53 @@ async function main() {
       }
       if (rows.some((r) => !r.ok)) process.exitCode = 1
       return
+    }
+    if (cmd === 'match') {
+      const id = anilistIdArg(sub)
+      const list = values.source ? [source(values.source)] : [...sources.values()]
+      const rows = []
+      for (const s of list) rows.push(await matcher.match(id, s, { refresh: values.refresh }))
+      if (values.json) return out(rows)
+      for (const r of rows) {
+        const where = r.showId
+          ? `${r.showId}  "${r.title ?? ''}"  confidence ${r.confidence}  offset ${r.episodeOffset}${r.episodeRange ? `  range ${r.episodeRange.join('-')}` : ''}`
+          : 'no match'
+        console.log(`${r.sourceId}\t${where}\n\t${r.reasons.join('; ')}`)
+      }
+      return
+    }
+    if (cmd === 'streams') {
+      const id = anilistIdArg(sub)
+      const episode = Number(rest[0])
+      if (!Number.isFinite(episode) || episode <= 0) throw new Error('usage: streams <anilistId> <episode>')
+      const audio = values.dub ? 'dub' : 'sub'
+      const list = values.source ? [source(values.source)] : [...sources.values()]
+      const errors: string[] = []
+      for (const s of list) {
+        try {
+          const r = await matcher.resolveEpisode(id, episode, s)
+          const streams = await s.getStreams(r.episodeId, { audio })
+          const result = { source: s.id, anilistId: id, episode, ...r, audio, ...streams }
+          if (values.json) return out(result)
+          console.log(`${s.id}: ${r.match.title ?? r.match.showId} — source episode ${r.sourceEpisode} (${r.episodeId}), ${audio}`)
+          for (const sv of streams.servers) {
+            console.log(`  ${sv.name}${sv.intro ? `  intro ${sv.intro.start}-${sv.intro.end}s` : ''}`)
+            for (const st of sv.streams) {
+              const flags = [st.audioLang && `audio=${st.audioLang}`, st.playlistKey && 'xor-playlists', st.ipLocked && 'ip-locked']
+              console.log(`    ${st.type} ${st.quality} ${st.url}  ${flags.filter(Boolean).join(' ')}`)
+              if (Object.keys(st.headers).length) console.log(`      headers ${JSON.stringify(st.headers)}`)
+            }
+            const subs = sv.subtitles
+            console.log(`    subtitles: ${subs.length} (${[...new Set(subs.map((x) => `${x.lang}/${x.format}`))].join(', ')})`)
+            const def = subs.find((x) => x.default) ?? subs[0]
+            if (def) console.log(`      default: ${def.label} ${def.url}`)
+          }
+          return
+        } catch (e) {
+          errors.push(`${s.id}: ${(e as Error).message}`)
+        }
+      }
+      throw new Error(`no streams.\n  ${errors.join('\n  ')}`)
     }
     if (cmd === 'catalog' && sub === 'update') {
       const r = await updateOfflineDb(fetcher, catalog, { force: values.force })

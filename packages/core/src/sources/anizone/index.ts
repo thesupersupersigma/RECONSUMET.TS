@@ -49,7 +49,7 @@ function listState(html: string): { nextCursor: string | null; hasMore: boolean 
 }
 
 export function parseSearch(html: string): SearchResult[] {
-  const items = jsonBlob<ApiAnime[]>(html, 'items:')
+  const items = /items:\s*\[\]/.test(html) ? [] : jsonBlob<ApiAnime[]>(html, 'items:') // no hits: a literal []
   if (!items) throw new Error('anizone: no result list in the search page (layout changed?)')
   return items.map((a) => ({
     id: a.slug,

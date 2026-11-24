@@ -103,6 +103,9 @@ describe('AniZone', () => {
       ['y25twzsk', 'Sousou no Frieren (2026)', 'TV', 2026, 10],
     ])
     expect(r[1]?.altTitles).toContain('Frieren: Beyond Journey`s End (2026)')
+    // no hits: the page renders a literal empty array instead of a JSON.parse blob
+    expect(parseAzSearch(`x-data="{ items: [], nextCursor: null, hasMore: false, loading: false }"`)).toEqual([])
+    expect(() => parseAzSearch('<html>something else</html>')).toThrow(/layout changed/)
   })
 
   it('getShow: one page', async () => {
