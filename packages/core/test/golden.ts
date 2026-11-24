@@ -30,7 +30,8 @@ export function isCorrect(expected: Expected | null, got: MatchResult): boolean 
 export function report(rows: { c: GoldenCase; source: string; got: MatchResult }[]) {
   const per: Record<string, { ok: number; total: number; misses: string[] }> = {}
   for (const { c, source, got } of rows) {
-    const p = (per[source] ??= { ok: 0, total: 0, misses: [] })
+    per[source] ??= { ok: 0, total: 0, misses: [] }
+    const p = per[source]
     p.total++
     if (isCorrect(c.expected[source] ?? null, got)) p.ok++
     else {

@@ -114,7 +114,9 @@ export async function runWasm(embed: FlixEmbed, keyFrag3: string): Promise<{ e: 
   if (k === 0 || frags.some((f) => f.length !== k)) throw new Error('flixcloud: key fragments have unequal lengths')
   const at = 1000 // the site's own JS uses this offset
   const view = new Uint8Array(x.memory.buffer)
-  frags.forEach((f, i) => view.set(f, at + i * k))
+  frags.forEach((f, i) => {
+    view.set(f, at + i * k)
+  })
   x._s(Number.parseInt(embed.seed.slice(0, 8), 16))
   x._r(at, at + k, at + 2 * k, at + 3 * k, k)
   const e = Buffer.from(new Uint8Array(x.memory.buffer).slice(at + 3 * k, at + 4 * k))

@@ -6,7 +6,8 @@ import { createClient, StreamsSchema } from '../src/index.ts'
 describe('client', () => {
   it('calls typed routes and the responses match the exported schemas', async () => {
     const { app, key } = await setup()
-    const fetch = ((input: string | URL | Request, init?: RequestInit) => app.request(input, init)) as typeof globalThis.fetch
+    const fetch = ((input: string | URL | Request, init?: RequestInit) =>
+      app.request(input, init)) as typeof globalThis.fetch
     const api = createClient('https://api.example.org', { apiKey: key, fetch })
 
     const health = await api.v1.health.$get()
