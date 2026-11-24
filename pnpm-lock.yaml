@@ -39,6 +39,9 @@ importers:
       '@electric-sql/pglite':
         specifier: ^0.6.0
         version: 0.6.0
+      '@reconsumet/relay':
+        specifier: workspace:*
+        version: link:../relay
       '@types/node':
         specifier: ^26.6.6
         version: 26.6.6

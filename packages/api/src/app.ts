@@ -2,8 +2,8 @@ import { getConnInfo } from '@hono/node-server/conninfo'
 import { swaggerUI } from '@hono/swagger-ui'
 import { createRoute, OpenAPIHono, z } from '@hono/zod-openapi'
 import {
-  type AniListMedia,
   AniListCapError,
+  type AniListMedia,
   type Audio,
   clientIp,
   createMatcher,
@@ -78,7 +78,10 @@ function windows() {
       prune = now + MIN
     }
     let w = hits.get(key)
-    if (!w || w.reset <= now) hits.set(key, (w = { n: 0, reset: now + MIN }))
+    if (!w || w.reset <= now) {
+      w = { n: 0, reset: now + MIN }
+      hits.set(key, w)
+    }
     w.n++
     return { ok: w.n <= limit, remaining: Math.max(0, limit - w.n), reset: w.reset }
   }
@@ -105,7 +108,8 @@ export function createApp(deps: AppDeps) {
   const pickSources = (id: string | undefined): Source[] => {
     if (!id) return [...sources.values()]
     const s = sources.get(id)
-    if (!s) throw new ApiError(400, 'unknown_source', `unknown source "${id}" (have: ${[...sources.keys()].join(', ')})`)
+    if (!s)
+      throw new ApiError(400, 'unknown_source', `unknown source "${id}" (have: ${[...sources.keys()].join(', ')})`)
     return [s]
   }
 
@@ -373,11 +377,19 @@ export function createApp(deps: AppDeps) {
             errs.push(`${s.id}: ${(e as Error).message}`)
           }
         }
-        throw new ApiError(404, 'no_streams', `no streams for AniList ${anilistId} episode ${episode} (${errs.join('; ')})`)
+        throw new ApiError(
+          404,
+          'no_streams',
+          `no streams for AniList ${anilistId} episode ${episode} (${errs.join('; ')})`,
+        )
       },
     )
 
-  app.openAPIRegistry.registerComponent('securitySchemes', 'apiKey', { type: 'apiKey', in: 'header', name: 'x-api-key' })
+  app.openAPIRegistry.registerComponent('securitySchemes', 'apiKey', {
+    type: 'apiKey',
+    in: 'header',
+    name: 'x-api-key',
+  })
   app.doc31('/openapi.json', {
     openapi: '3.1.0',
     info: { title: 'RECONSUMΣT.TS API', version: VERSION, license: { name: 'GPL-3.0-or-later' } },

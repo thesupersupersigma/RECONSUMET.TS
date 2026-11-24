@@ -44,7 +44,9 @@ export const streams: StreamResult = {
           audioLang: 'jpn',
         },
       ],
-      subtitles: [{ lang: 'en', label: 'English', url: `https://${UPSTREAM}/subs/en.vtt`, format: 'vtt', default: true }],
+      subtitles: [
+        { lang: 'en', label: 'English', url: `https://${UPSTREAM}/subs/en.vtt`, format: 'vtt', default: true },
+      ],
     },
   ],
 }
