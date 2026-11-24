@@ -63,3 +63,6 @@ _*.txt
 
 # Generated tool output
 /out/
+
+# Claude Code task prompts (local only)
+/prompts/
