@@ -96,7 +96,7 @@ reconsumet-api keys list
 reconsumet-api keys revoke 3
 ```
 
-Or without any command: set `API_BOOTSTRAP_KEY` (at least 32 characters, e.g. `openssl rand -base64 32`) and the API
+Or without any command: set `API_BOOTSTRAP_KEY` (at least 32 characters, e.g. `openssl rand -hex 32`) and the API
 makes sure that key exists on every start (named `API_BOOTSTRAP_KEY_NAME`, default `bootstrap`, with
 `API_BOOTSTRAP_KEY_RPM` requests/minute if set). Only its hash is stored and the value is never logged. If it already
 exists nothing changes; a revoked bootstrap key stays revoked (to replace it, set a new value).

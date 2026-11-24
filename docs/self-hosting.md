@@ -19,7 +19,7 @@ bundled Caddy (one command, automatic certificates) or with the reverse proxy yo
 
 ```sh
 git clone https://github.com/thesupersupersigma/RECONSUMET.TS.git && cd RECONSUMET.TS
-cp .env.example .env                 # then set POSTGRES_PASSWORD and RELAY_SECRET in .env (openssl rand -base64 32)
+cp .env.example .env                 # then set POSTGRES_PASSWORD and RELAY_SECRET in .env (openssl rand -hex 32)
 docker compose up -d                 # builds the two images from this checkout, starts Postgres + API + relay
 curl http://localhost:8080/v1/health # {"ok":true,...}; the browsable API is at http://localhost:8080/docs
 docker compose exec api node dist/cli.js keys create mysite   # an API key for your site (shown once)
@@ -37,13 +37,14 @@ The API applies its database migrations on every start, then imports the anime c
 ## Secrets and API keys
 
 - `RELAY_SECRET` (API and relay, the same value, at least 32 characters) seals every stream link. `POSTGRES_PASSWORD`
-  is the bundled database's password. Generate each with `openssl rand -base64 32` or
-  `node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"`. They live only in `.env`, which
-  is gitignored.
+  is the bundled database's password. Generate each with `openssl rand -hex 32` or
+  `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`. They live only in `.env`, which
+  is gitignored. Use hex, not base64: compose puts `POSTGRES_PASSWORD` into a `postgres://` URL, and base64's
+  `/`, `+` and `=` break it.
 - **API keys** are for your site's server (never put one in browser code). Only a hash is stored:
   `docker compose exec api node dist/cli.js keys create <name> [requestsPerMinute]`, `keys list`, `keys revoke <id>`.
   **Or with no command at all:** put a key you generate yourself in `.env` as `API_BOOTSTRAP_KEY=` (at least 32
-  characters, `openssl rand -base64 32`); the API creates it on start if it doesn't exist yet and leaves it alone
+  characters, `openssl rand -hex 32`); the API creates it on start if it doesn't exist yet and leaves it alone
   after that. Give the same value to your site. Useful when one compose file starts the API and the site together.
   The streams route needs a key unless `REQUIRE_KEY_FOR_STREAMS=false`.
 - **Rotating `RELAY_SECRET`:** set the relay's `RELAY_SECRET=<new>` and `RELAY_SECRET_PREVIOUS=<old>`, restart it;

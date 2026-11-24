@@ -40,7 +40,7 @@ upload, so that decides how many can watch at once.
 
 ```sh
 git clone https://github.com/thesupersupersigma/RECONSUMET.TS.git && cd RECONSUMET.TS
-cp .env.example .env                 # set POSTGRES_PASSWORD and RELAY_SECRET (openssl rand -base64 32)
+cp .env.example .env                 # set POSTGRES_PASSWORD and RELAY_SECRET (openssl rand -hex 32)
 docker compose up -d                 # Postgres + API + relay; add --profile caddy for automatic HTTPS
 curl http://localhost:8080/v1/health # API docs: http://localhost:8080/docs
 docker compose exec api node dist/cli.js keys create mysite   # or set API_BOOTSTRAP_KEY in .env
