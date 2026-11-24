@@ -194,7 +194,7 @@ export function createRelay(config: RelayConfig, deps: RelayDeps = {}) {
     if (!t) res = fail(c, 403, 'bad_token', 'invalid token')
     else if (t.e < now()) res = fail(c, 410, 'expired', 'token expired')
     else {
-      const ip = clientIp(remote(c), c.req.header('x-forwarded-for'), trusted)
+      const ip = clientIp(remote(c), c.req.header(config.clientIpHeader), trusted)
       if (t.ip && t.ip !== ip) res = fail(c, 403, 'viewer_mismatch', 'token belongs to another viewer')
       else res = t.k === 'playlist' ? await playlist(c, t) : await media(c, t, ext.toLowerCase(), ip)
     }

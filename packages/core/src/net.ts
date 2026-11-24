@@ -1,4 +1,5 @@
-// The client's IP behind reverse proxies: X-Forwarded-For is only believed when the direct peer is a trusted proxy.
+// The client's IP behind reverse proxies: X-Forwarded-For (or a single-IP header like CF-Connecting-IP) is only
+// believed when the direct peer is a trusted proxy.
 import { BlockList, isIP } from 'node:net'
 
 /** TRUSTED_PROXIES-style list ("10.0.0.0/8, 172.16.0.0/12, ::1") → a BlockList. */

@@ -4,10 +4,10 @@
 //   ours    – what a browser on our site sends cross-origin (Origin + Referer = our site)
 //   source  – the source's own Referer/Origin (what a relay would have to add)
 // Direct playback works only if `ours` gets 200 with a matching Access-Control-Allow-Origin on the plain tier.
-// Usage: node tools/playback-check/probe.ts <url> [--referer https://source-site/]
+// Usage: node tools/playback-check/probe.ts <url> [--referer https://source-site/] [--site https://your-site.example]
+// The site origin comes from --site or PROBE_SITE; https://example.com stands in for it otherwise.
+import { parseArgs } from 'node:util'
 import { createFetcher } from '../../packages/core/src/index.ts'
-
-const SITE = 'https://thesupersuperanime.lol'
 
 export interface ProbeRow {
   tier: 'plain' | 'impersonate'
@@ -17,8 +17,9 @@ export interface ProbeRow {
   bytes: number
 }
 
-export async function probe(url: string, referer?: string): Promise<ProbeRow[]> {
-  const sets: Record<string, Record<string, string>> = { bare: {}, ours: { origin: SITE, referer: `${SITE}/` } }
+export async function probe(url: string, referer?: string, site = 'https://example.com'): Promise<ProbeRow[]> {
+  const origin = new URL(site).origin
+  const sets: Record<string, Record<string, string>> = { bare: {}, ours: { origin, referer: `${origin}/` } }
   if (referer) sets.source = { origin: new URL(referer).origin, referer }
   const f = createFetcher({ retry: { attempts: 0 } })
   const rows: ProbeRow[] = []
@@ -45,7 +46,11 @@ export async function probe(url: string, referer?: string): Promise<ProbeRow[]> 
 }
 
 if (import.meta.main) {
-  const [url, flag, ref] = process.argv.slice(2)
-  if (!url) throw new Error('usage: probe.ts <url> [--referer <url>]')
-  console.table(await probe(url, flag === '--referer' ? ref : undefined))
+  const { values, positionals } = parseArgs({
+    allowPositionals: true,
+    options: { referer: { type: 'string' }, site: { type: 'string', default: process.env.PROBE_SITE } },
+  })
+  const [url] = positionals
+  if (!url) throw new Error('usage: probe.ts <url> [--referer <url>] [--site <origin>]')
+  console.table(await probe(url, values.referer, values.site))
 }

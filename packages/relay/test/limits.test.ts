@@ -40,6 +40,14 @@ describe('createLimits', () => {
     expect(l.open('1.1.1.1')).toBeTruthy()
     expect(l.open('1.1.1.1')).toBeNull()
   })
+
+  it('no global ceiling when unset', async () => {
+    const l = createLimits({ maxStreamsPerIp: 1, ipBytesPerSec: 1e9 })
+    const body = new Blob([new Uint8Array(200_000)]).stream()
+    const out = await new Response(l.pipe('1.1.1.1', body, () => {})).arrayBuffer()
+    expect(out.byteLength).toBe(200_000)
+    expect(l.stats.throttledMs).toBe(0)
+  })
 })
 
 describe('loadConfig', () => {
@@ -55,7 +63,8 @@ describe('loadConfig', () => {
       metricsToken: undefined,
       maxStreamsPerIp: 6,
       ipBytesPerSec: 1_500_000,
-      globalBytesPerSec: 4_000_000,
+      globalBytesPerSec: undefined,
+      clientIpHeader: 'x-forwarded-for',
       childTtlMs: 360 * 60_000,
       maxPlaylistLines: 20_000,
       maxSegmentBytes: 64 * 1024 * 1024,
@@ -67,6 +76,7 @@ describe('loadConfig', () => {
     expect(() => loadConfig({ RELAY_SECRET: 'short' })).toThrow(/at least 32/)
     expect(() => loadConfig({ RELAY_SECRET: 'x'.repeat(32), PORT: 'abc' })).toThrow(/PORT must be a positive integer/)
     expect(() => loadConfig({ RELAY_SECRET: 'x'.repeat(32), RELAY_IP_MBPS: '-1' })).toThrow(/RELAY_IP_MBPS/)
+    expect(loadConfig({ RELAY_SECRET: 'x'.repeat(32), RELAY_GLOBAL_MBPS: '32' }).globalBytesPerSec).toBe(4_000_000)
     expect(loadConfig({ RELAY_SECRET: 'x'.repeat(32), RELAY_SECRET_PREVIOUS: 'y'.repeat(32) }).secrets).toHaveLength(2)
   })
 })

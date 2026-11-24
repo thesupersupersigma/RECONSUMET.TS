@@ -132,7 +132,7 @@ export function createApp(deps: AppDeps) {
 
   // who is calling + rate limits, for every /v1 route
   app.use('/v1/*', async (c, next) => {
-    const ip = clientIp(remoteAddr(c), c.req.header('x-forwarded-for'), trusted)
+    const ip = clientIp(remoteAddr(c), c.req.header(config.clientIpHeader), trusted)
     c.set('ip', ip)
     const raw = c.req.header('x-api-key') ?? c.req.header('authorization')?.replace(/^Bearer\s+/i, '')
     let key: Env['Variables']['key'] = null

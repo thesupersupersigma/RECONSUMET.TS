@@ -2,12 +2,13 @@
 // RELAY_SECRET              required; the secret the API seals tokens with (at least 32 characters)
 // RELAY_SECRET_PREVIOUS     optional; the previous secret, still accepted while a rotation is in progress
 // RELAY_ALLOWED_ORIGINS     comma list of site origins (https://example.org) allowed to call the relay from a browser
-// TRUSTED_PROXIES           comma list of IPs/CIDRs whose X-Forwarded-For is believed
+// TRUSTED_PROXIES           comma list of IPs/CIDRs whose X-Forwarded-For (or CLIENT_IP_HEADER) is believed
+// CLIENT_IP_HEADER          header holding the viewer's IP, default X-Forwarded-For (e.g. CF-Connecting-IP, X-Real-IP)
 // PORT                      listen port, default 8081
 // RELAY_METRICS_TOKEN       optional; bearer token for /metrics, which is 404 without it
 // RELAY_MAX_STREAMS_PER_IP  bodies streamed to one client IP at once, default 6
 // RELAY_IP_MBPS             bandwidth ceiling per client IP, megabits/s, default 12
-// RELAY_GLOBAL_MBPS         bandwidth ceiling for the whole relay, megabits/s, default 32
+// RELAY_GLOBAL_MBPS         bandwidth ceiling for the whole relay, megabits/s, default none (off)
 // RELAY_CHILD_TTL_MIN       lifetime of the tokens minted while rewriting a playlist, minutes, default 360
 // RELAY_MAX_PLAYLIST_LINES  longer playlists are refused, default 20000
 // RELAY_MAX_SEGMENT_MB      size cap for segments and init segments, MiB, default 64
@@ -17,11 +18,12 @@ export interface RelayConfig {
   secrets: string[]
   allowedOrigins: string[]
   trustedProxies: string
+  clientIpHeader: string
   port: number
   metricsToken: string | undefined
   maxStreamsPerIp: number
   ipBytesPerSec: number
-  globalBytesPerSec: number
+  globalBytesPerSec: number | undefined
   childTtlMs: number
   maxPlaylistLines: number
   maxSegmentBytes: number
@@ -58,11 +60,12 @@ export function loadConfig(env: Env = process.env): RelayConfig {
     secrets: previous ? [secret, previous] : [secret],
     allowedOrigins: list(env.RELAY_ALLOWED_ORIGINS),
     trustedProxies: env.TRUSTED_PROXIES ?? '',
+    clientIpHeader: env.CLIENT_IP_HEADER?.trim() || 'x-forwarded-for',
     port,
     metricsToken: env.RELAY_METRICS_TOKEN?.trim() || undefined,
     maxStreamsPerIp: num(env, 'RELAY_MAX_STREAMS_PER_IP', 6),
     ipBytesPerSec: mbps(num(env, 'RELAY_IP_MBPS', 12, false)),
-    globalBytesPerSec: mbps(num(env, 'RELAY_GLOBAL_MBPS', 32, false)),
+    globalBytesPerSec: env.RELAY_GLOBAL_MBPS?.trim() ? mbps(num(env, 'RELAY_GLOBAL_MBPS', 0, false)) : undefined,
     childTtlMs: num(env, 'RELAY_CHILD_TTL_MIN', 360) * 60_000,
     maxPlaylistLines: num(env, 'RELAY_MAX_PLAYLIST_LINES', 20_000),
     maxSegmentBytes: num(env, 'RELAY_MAX_SEGMENT_MB', 64) * 1024 * 1024,

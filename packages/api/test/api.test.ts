@@ -179,6 +179,20 @@ describe('rate limits', () => {
     expect((await get(app, '/v1/health', { 'x-forwarded-for': '2.2.2.2' })).status).toBe(200)
     expect((await get(app, '/v1/health', { 'x-forwarded-for': '2.2.2.2' })).status).toBe(429)
   })
+
+  it('CLIENT_IP_HEADER replaces X-Forwarded-For, still only from a trusted proxy', async () => {
+    const env = { RATE_LIMIT_IP_PER_MIN: '1', TRUSTED_PROXIES: '10.0.0.0/8', CLIENT_IP_HEADER: 'CF-Connecting-IP' }
+    const { app, state } = await setup(env)
+    expect((await get(app, '/v1/health', { 'cf-connecting-ip': '1.1.1.1' })).status).toBe(200)
+    expect((await get(app, '/v1/health', { 'cf-connecting-ip': '2.2.2.2' })).status).toBe(429)
+    state.remote = '10.1.2.3'
+    expect((await get(app, '/v1/health', { 'cf-connecting-ip': '1.1.1.1' })).status).toBe(200)
+    expect((await get(app, '/v1/health', { 'cf-connecting-ip': '2.2.2.2' })).status).toBe(200)
+    // X-Forwarded-For is ignored once another header is configured
+    expect((await get(app, '/v1/health', { 'cf-connecting-ip': '2.2.2.2', 'x-forwarded-for': '3.3.3.3' })).status).toBe(
+      429,
+    )
+  })
 })
 
 describe('config', () => {
@@ -187,5 +201,14 @@ describe('config', () => {
     const base = { DATABASE_URL: 'x', PUBLIC_URL: 'https://a.example', RELAY_PUBLIC_URL: 'https://r.example' }
     expect(() => loadConfig({ ...base, RELAY_SECRET: 'short' })).toThrow(/RELAY_SECRET/)
     expect(() => loadConfig({ ...base, RELAY_SECRET: SECRET, PUBLIC_URL: '/api' })).toThrow(/PUBLIC_URL/)
+    expect(() => loadConfig({ RELAY_SECRET: SECRET })).toThrow(/DATABASE_URL/)
+  })
+
+  it('starts with only DATABASE_URL and RELAY_SECRET', async () => {
+    const { loadConfig } = await import('../src/config.ts')
+    const c = loadConfig({ DATABASE_URL: 'x', RELAY_SECRET: SECRET, PORT: '9000' })
+    expect(c.publicUrl).toBe('http://localhost:9000')
+    expect(c.relayPublicUrl).toBe('http://localhost:8081')
+    expect(c.clientIpHeader).toBe('x-forwarded-for')
   })
 })

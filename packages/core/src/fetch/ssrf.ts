@@ -12,7 +12,7 @@ const blocklist = new BlockList()
 for (const [net, bits] of [
   ['0.0.0.0', 8], // "this network"
   ['10.0.0.0', 8], // private
-  ['100.64.0.0', 10], // CGNAT, also Tailscale's range (tsss-server!) and Alibaba metadata 100.100.100.200
+  ['100.64.0.0', 10], // CGNAT: Tailscale and other CGNAT VPNs, Alibaba metadata 100.100.100.200
   ['127.0.0.0', 8], // loopback
   ['169.254.0.0', 16], // link-local, cloud metadata 169.254.169.254
   ['172.16.0.0', 12], // private

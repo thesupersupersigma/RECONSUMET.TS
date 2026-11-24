@@ -35,12 +35,13 @@ interface Peer {
 export interface LimitOptions {
   maxStreamsPerIp: number
   ipBytesPerSec: number
-  globalBytesPerSec: number
+  /** Unset = no global ceiling. */
+  globalBytesPerSec?: number
 }
 
 export function createLimits(opts: LimitOptions) {
   const peers = new Map<string, Peer>()
-  const all = new Bucket(opts.globalBytesPerSec, performance.now())
+  const all = opts.globalBytesPerSec ? new Bucket(opts.globalBytesPerSec, performance.now()) : null
   const stats = { bytesOut: 0, activeStreams: 0, throttledMs: 0 }
   let swept = performance.now()
 
@@ -112,7 +113,7 @@ export function createLimits(opts: LimitOptions) {
               for (let i = 0; i < value.byteLength; i += CHUNK) {
                 const part = value.subarray(i, i + CHUNK)
                 const now = performance.now()
-                const wait = Math.max(bucket.take(part.byteLength, now), all.take(part.byteLength, now))
+                const wait = Math.max(bucket.take(part.byteLength, now), all?.take(part.byteLength, now) ?? 0)
                 if (wait > 0) {
                   stats.throttledMs += wait
                   await sleep(wait)

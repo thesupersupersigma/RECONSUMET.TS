@@ -1,4 +1,4 @@
-// Every setting comes from the environment (docs/deploy.md explains each one). Public URLs are config, never the
+// Every setting comes from the environment (docs/self-hosting.md explains each one). Public URLs are config, never the
 // request's Host header.
 export interface ApiConfig {
   databaseUrl: string
@@ -14,6 +14,8 @@ export interface ApiConfig {
   relaySharesEgress: boolean
   requireKeyForStreams: boolean
   trustedProxies: string
+  /** Header holding the viewer's IP (default X-Forwarded-For), believed only from TRUSTED_PROXIES. */
+  clientIpHeader: string
   ipPerMin: number
   keyPerMin: number
   jobs: boolean
@@ -27,9 +29,8 @@ const num = (env: NodeJS.ProcessEnv, name: string, dflt: number) => {
   if (!Number.isFinite(n) || n <= 0) throw new Error(`${name} must be a positive number, got "${v}"`)
   return n
 }
-const url = (env: NodeJS.ProcessEnv, name: string) => {
-  const v = env[name]
-  if (!v) throw new Error(`${name} is required`)
+const url = (env: NodeJS.ProcessEnv, name: string, dflt: string) => {
+  const v = env[name] || dflt
   try {
     return new URL(v).href.replace(/\/$/, '')
   } catch {
@@ -39,18 +40,21 @@ const url = (env: NodeJS.ProcessEnv, name: string) => {
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
   const relaySecret = env.RELAY_SECRET ?? ''
-  if (relaySecret.length < 32) throw new Error('RELAY_SECRET is required (at least 32 characters, see docs/deploy.md)')
+  if (relaySecret.length < 32)
+    throw new Error('RELAY_SECRET is required (at least 32 characters, see docs/self-hosting.md)')
   if (!env.DATABASE_URL) throw new Error('DATABASE_URL is required')
+  const port = num(env, 'PORT', 8080)
   return {
     databaseUrl: env.DATABASE_URL,
-    port: num(env, 'PORT', 8080),
-    publicUrl: url(env, 'PUBLIC_URL'),
-    relayPublicUrl: url(env, 'RELAY_PUBLIC_URL'),
+    port,
+    publicUrl: url(env, 'PUBLIC_URL', `http://localhost:${port}`),
+    relayPublicUrl: url(env, 'RELAY_PUBLIC_URL', 'http://localhost:8081'),
     relaySecret,
     relayTokenTtlMs: num(env, 'RELAY_TOKEN_TTL_MIN', 10) * 60_000,
     relaySharesEgress: bool(env.RELAY_SHARES_EGRESS_WITH_API, true),
     requireKeyForStreams: bool(env.REQUIRE_KEY_FOR_STREAMS, true),
     trustedProxies: env.TRUSTED_PROXIES ?? '',
+    clientIpHeader: env.CLIENT_IP_HEADER?.trim() || 'x-forwarded-for',
     ipPerMin: num(env, 'RATE_LIMIT_IP_PER_MIN', 60),
     keyPerMin: num(env, 'RATE_LIMIT_KEY_PER_MIN', 600),
     jobs: bool(env.JOBS_ENABLED, true),
