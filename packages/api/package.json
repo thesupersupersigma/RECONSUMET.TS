@@ -23,6 +23,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "dev": "node --env-file-if-exists=../../.env --watch src/main.ts",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
     "test:live": "vitest run --config vitest.live.config.ts",

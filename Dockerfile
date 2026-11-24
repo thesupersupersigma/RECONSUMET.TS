@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 # Two images from one file: `docker build --target api .` and `docker build --target relay .`
-# Debian bookworm-slim (glibc: wreq-js ships glibc prebuilts). Nothing is compiled for the build machine's CPU, so the
-# images run on tsss-server's no-AVX Xeons.
+# Debian bookworm-slim (glibc: wreq-js ships glibc prebuilts for x64 and arm64). Nothing is compiled for the build
+# machine's CPU, so the images run on any baseline x86-64 CPU (no AVX needed) and on arm64.
 
 FROM node:26-bookworm-slim AS build
 RUN npm install -g pnpm@11.13.0

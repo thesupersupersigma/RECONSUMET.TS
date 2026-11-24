@@ -1,0 +1,10 @@
+# Used by `docker compose --profile caddy up -d`. Caddy gets Let's Encrypt certificates for both names by itself:
+# their DNS must point at this machine and ports 80 + 443 must reach it. One domain only? See docs/self-hosting.md
+# ("relay under a path").
+{$API_DOMAIN} {
+	reverse_proxy api:8080
+}
+
+{$RELAY_DOMAIN} {
+	reverse_proxy relay:8081
+}

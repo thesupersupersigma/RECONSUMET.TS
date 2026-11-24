@@ -1,8 +1,12 @@
-# Local/dev stack: Postgres 17 + API + relay. `cp .env.example .env`, fill in the secrets, `docker compose up --build`.
-# Production runs the same two images on Coolify (docs/deploy.md).
+# RECONSUMΣT.TS: Postgres + API + relay. Guide: docs/self-hosting.md.
+#   cp .env.example .env   # set POSTGRES_PASSWORD and RELAY_SECRET
+#   docker compose up -d                    # builds the images from this checkout
+#   docker compose pull && docker compose up -d   # or: use the prebuilt images from GHCR
+#   docker compose --profile caddy up -d    # + Caddy with automatic HTTPS (API_DOMAIN, RELAY_DOMAIN in .env)
 services:
   postgres:
     image: postgres:17-bookworm
+    restart: unless-stopped
     environment:
       POSTGRES_USER: reconsumet
       POSTGRES_DB: reconsumet
@@ -15,7 +19,9 @@ services:
       retries: 20
 
   api:
+    image: ghcr.io/thesupersupersigma/reconsumet-api:${RECONSUMET_VERSION:-latest}
     build: { context: ., target: api }
+    restart: unless-stopped
     env_file: [{ path: .env, required: false }]
     environment:
       PORT: 8080
@@ -23,15 +29,36 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
     ports:
-      - "${API_PORT:-8080}:8080"
+      - "${BIND_ADDR:-127.0.0.1}:${API_PORT:-8080}:8080"
 
   relay:
+    image: ghcr.io/thesupersupersigma/reconsumet-relay:${RECONSUMET_VERSION:-latest}
     build: { context: ., target: relay }
+    restart: unless-stopped
     env_file: [{ path: .env, required: false }]
     environment:
       PORT: 8081
     ports:
-      - "${RELAY_PORT:-8081}:8081"
+      - "${BIND_ADDR:-127.0.0.1}:${RELAY_PORT:-8081}:8081"
+
+  caddy:
+    image: caddy:2
+    profiles: [caddy]
+    restart: unless-stopped
+    environment:
+      API_DOMAIN: ${API_DOMAIN:-}
+      RELAY_DOMAIN: ${RELAY_DOMAIN:-}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on: [api, relay]
 
 volumes:
   pgdata:
+  caddy-data:
+  caddy-config:

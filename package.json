@@ -16,6 +16,7 @@
   },
   "scripts": {
     "build": "pnpm -r build",
+    "dev": "pnpm build && pnpm --parallel --filter @reconsumet/api --filter @reconsumet/relay dev",
     "test": "pnpm -r test",
     "test:live": "pnpm -r test:live",
     "lint": "biome check .",
