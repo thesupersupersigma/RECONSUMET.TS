@@ -47,7 +47,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
   if (!env.DATABASE_URL) throw new Error('DATABASE_URL is required')
   const bootstrapKey = env.API_BOOTSTRAP_KEY ?? ''
   if (bootstrapKey && bootstrapKey.length < 32)
-    throw new Error('API_BOOTSTRAP_KEY must be at least 32 characters (openssl rand -base64 32), or empty')
+    throw new Error('API_BOOTSTRAP_KEY must be at least 32 characters (openssl rand -hex 32), or empty')
   const port = num(env, 'PORT', 8080)
   return {
     databaseUrl: env.DATABASE_URL,
