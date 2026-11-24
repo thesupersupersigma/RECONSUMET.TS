@@ -1,4 +1,5 @@
-# On a v* tag: multi-arch images to ghcr.io/thesupersupersigma/reconsumet-{api,relay}:<version> and :latest.
+# On a v* tag: the npm packages (job npm) and multi-arch images to
+# ghcr.io/thesupersupersigma/reconsumet-{api,relay}:<version> and :latest.
 name: release
 on:
   push:
@@ -35,3 +36,24 @@ jobs:
             ghcr.io/thesupersupersigma/reconsumet-${{ matrix.target }}:${{ steps.v.outputs.version }}
             ghcr.io/thesupersupersigma/reconsumet-${{ matrix.target }}:latest
           labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
+
+  # @reconsumet/core + @reconsumet/client via npm trusted publishing (OIDC, no NPM_TOKEN; provenance is automatic).
+  # Versions already on npm are skipped (docs/publishing.md).
+  npm:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 26
+          registry-url: https://registry.npmjs.org
+          cache: pnpm
+      - run: npm install -g npm@latest # trusted publishing needs npm >= 11.5.1
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm test
+      - run: node scripts/publish-npm.mjs
