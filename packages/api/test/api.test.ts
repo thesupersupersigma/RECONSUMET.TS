@@ -1,8 +1,9 @@
 import { openToken } from '@reconsumet/core'
 import { latestHealth, PgCatalogStore, runJobIfDue } from '@reconsumet/db'
 import { describe, expect, it } from 'vitest'
+import { VERSION } from '../src/app.ts'
 import { jobList } from '../src/jobs.ts'
-import { SECRET, setup, UPSTREAM } from './helpers.ts'
+import { SECRET, setup, skip, UPSTREAM, usage } from './helpers.ts'
 
 const get = (app: Awaited<ReturnType<typeof setup>>['app'], path: string, headers: Record<string, string> = {}) =>
   app.request(path, { headers })
@@ -10,7 +11,8 @@ const get = (app: Awaited<ReturnType<typeof setup>>['app'], path: string, header
 describe('meta routes', () => {
   it('health, OpenAPI document and docs UI', async () => {
     const { app } = await setup()
-    expect(await (await get(app, '/v1/health')).json()).toEqual({ ok: true, version: '0.4.2' })
+    expect(await (await get(app, '/v1/health')).json()).toEqual({ ok: true, version: VERSION })
+    expect(await (await get(app, '/v1/status')).json()).toEqual({ version: VERSION, anilist: usage, aniskip: true })
     const doc = (await (await get(app, '/openapi.json', { host: 'evil.example' })).json()) as {
       servers: { url: string }[]
       paths: Record<string, unknown>
@@ -24,6 +26,8 @@ describe('meta routes', () => {
         '/v1/anime/{anilistId}',
         '/v1/anime/{anilistId}/episodes',
         '/v1/anime/{anilistId}/episodes/{episode}/streams',
+        '/v1/anime/{anilistId}/episodes/{episode}/skip',
+        '/v1/status',
       ]),
     )
     expect((await get(app, '/docs')).status).toBe(200)
@@ -55,10 +59,11 @@ describe('meta routes', () => {
         year: 2023,
         picture: null,
         duration: 1440,
+        isAdult: false,
       },
     ])
     const hits = (await (await get(app, '/v1/search?q=frieren')).json()) as { anilistId: number }[]
-    expect(hits[0]?.anilistId).toBe(154587)
+    expect(hits[0]).toMatchObject({ anilistId: 154587, isAdult: false })
   })
 
   it('sources carry the latest health check from the job', async () => {
@@ -84,6 +89,12 @@ describe('episodes + streams', () => {
     const { app } = await setup()
     const r = (await (await get(app, '/v1/anime/1/episodes')).json()) as { episodes: { number: number }[] }
     expect(r.episodes.map((e) => e.number)).toEqual(Array.from({ length: 12 }, (_, i) => i + 1))
+    // AniList streamingEpisodes fill in the missing title + a thumbnail; nothing invented for the rest
+    expect(r.episodes.slice(0, 3)).toEqual([
+      { number: 1, title: 'The Start', thumbnail: 'https://img.example/1.jpg', sub: true },
+      { number: 2, thumbnail: 'https://img.example/2.jpg', sub: true },
+      { number: 3, sub: true },
+    ])
     expect((await get(app, '/v1/anime/1/episodes?source=nope')).status).toBe(400)
   })
 
@@ -153,6 +164,39 @@ describe('episodes + streams', () => {
     const res = await get(app, '/v1/anime/1/episodes/13/streams', { 'x-api-key': key })
     expect(res.status).toBe(404)
     expect(((await res.json()) as { error: { code: string } }).error.code).toBe('no_streams')
+  })
+})
+
+describe('anime details + skip times', () => {
+  it('details include the 0.6 fields', async () => {
+    const { app } = await setup()
+    const r = await get(app, '/v1/anime/1')
+    expect(r.status).toBe(200)
+    expect(await r.json()).toMatchObject({
+      id: 1,
+      studios: [],
+      characters: [],
+      isAdult: false,
+      relations: { edges: [] },
+    })
+    expect((await get(app, '/v1/anime/404')).status).toBe(404)
+  })
+
+  it('skip times by MAL ID; none without one; validated duration', async () => {
+    const { app, skipCalls } = await setup()
+    const r = await get(app, '/v1/anime/2/episodes/3/skip?duration=1377.3')
+    expect(await r.json()).toEqual(skip)
+    expect(skipCalls).toEqual([[1535, 3, 1377.3]])
+    expect(await (await get(app, '/v1/anime/1/episodes/3/skip?duration=1377')).json()).toEqual({ source: 'none' })
+    expect(skipCalls).toHaveLength(1)
+    expect((await get(app, '/v1/anime/2/episodes/3/skip')).status).toBe(400)
+    expect((await get(app, '/v1/anime/404/episodes/3/skip?duration=1')).status).toBe(404)
+  })
+
+  it('ANISKIP_ENABLED=false: always none, no lookups', async () => {
+    const { app } = await setup({ ANISKIP_ENABLED: 'false' })
+    expect(await (await get(app, '/v1/anime/2/episodes/3/skip?duration=1377')).json()).toEqual({ source: 'none' })
+    expect(((await (await get(app, '/v1/status')).json()) as { aniskip: boolean }).aniskip).toBe(false)
   })
 })
 

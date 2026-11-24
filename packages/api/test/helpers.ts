@@ -1,4 +1,4 @@
-import type { AniListMedia, Source, StreamResult } from '@reconsumet/core'
+import type { AniListDetails, SkipTimes, Source, StreamResult } from '@reconsumet/core'
 import { connectPglite, createApiKey, type Db, migrate, pgMappingStore } from '@reconsumet/db'
 import { createApp } from '../src/app.ts'
 import { loadConfig } from '../src/config.ts'
@@ -86,9 +86,45 @@ export const media = {
   startDate: { year: 2024, month: 10, day: 1 },
   endDate: { year: 2024, month: 12, day: 20 },
   duration: 24,
-  coverImage: { large: null },
+  coverImage: { extraLarge: null, large: null, medium: null, color: null },
   nextAiringEpisode: null,
-} satisfies AniListMedia
+  description: null,
+  bannerImage: null,
+  genres: [],
+  tags: [],
+  averageScore: null,
+  meanScore: null,
+  popularity: null,
+  favourites: null,
+  studios: [],
+  source: null,
+  countryOfOrigin: 'JP',
+  isAdult: false,
+  hashtag: null,
+  siteUrl: null,
+  trailer: null,
+  characters: [],
+  recommendations: [],
+  externalLinks: [],
+  // AniList numbering: the source has no titles, so episode 1 takes this one
+  streamingEpisodes: [
+    { title: 'Episode 1 - The Start', thumbnail: 'https://img.example/1.jpg', url: null, site: 'Crunchyroll' },
+    { title: 'Episode 2', thumbnail: 'https://img.example/2.jpg', url: null, site: 'Crunchyroll' },
+  ],
+  relations: { edges: [] },
+} satisfies AniListDetails
+
+export const usage = {
+  day: '2026-11-24',
+  count: 3,
+  cap: 3000,
+  lastMinute: 1,
+  perMinute: 20,
+  sync: { count: 4, cap: 20 },
+  pausedUntil: null,
+}
+
+export const skip: SkipTimes = { intro: { start: 1, end: 91 }, outro: { start: 1284, end: 1377 }, source: 'aniskip' }
 
 export async function setup(extraEnv: Record<string, string> = {}, remote = '203.0.113.5') {
   const db: Db = await connectPglite()
@@ -98,13 +134,25 @@ export async function setup(extraEnv: Record<string, string> = {}, remote = '203
   const source = fakeSource()
   const config = env(extraEnv)
   const state = { remote }
+  const skipCalls: [number, number, number][] = []
   const app = createApp({
     config,
     db,
     sources: new Map([[source.id, source]]),
-    anilist: { media: async (id) => (id === 1 ? media : null) },
+    anilist: {
+      media: async (id) => (id === 1 ? media : id === 2 ? { ...media, id: 2, idMal: 1535 } : null),
+      usage: async () => usage,
+    },
+    aniskip: config.aniskipEnabled
+      ? {
+          skipTimes: async (...args) => {
+            skipCalls.push(args)
+            return skip
+          },
+        }
+      : null,
     remoteAddr: () => state.remote,
   })
   const { key } = await createApiKey(db, 'site')
-  return { app, db, source, key, state, config }
+  return { app, db, source, key, state, config, skipCalls }
 }

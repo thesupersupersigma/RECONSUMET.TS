@@ -1,3 +1,5 @@
+import { ANISKIP_URL } from '@reconsumet/core'
+
 // Every setting comes from the environment (docs/self-hosting.md explains each one). Public URLs are config, never the
 // request's Host header.
 export interface ApiConfig {
@@ -19,6 +21,9 @@ export interface ApiConfig {
   ipPerMin: number
   keyPerMin: number
   jobs: boolean
+  /** AniSkip skip times (third-party); false = always "none", no outside requests. */
+  aniskipEnabled: boolean
+  aniskipUrl: string
   /** API_BOOTSTRAP_KEY: a key that must exist (created on start if missing), for setups with no CLI step. */
   bootstrapKey: { key: string; name: string; rateLimit: number | null } | null
 }
@@ -63,6 +68,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     ipPerMin: num(env, 'RATE_LIMIT_IP_PER_MIN', 60),
     keyPerMin: num(env, 'RATE_LIMIT_KEY_PER_MIN', 600),
     jobs: bool(env.JOBS_ENABLED, true),
+    aniskipEnabled: bool(env.ANISKIP_ENABLED, true),
+    aniskipUrl: url(env, 'ANISKIP_URL', ANISKIP_URL),
     bootstrapKey: bootstrapKey
       ? {
           key: bootstrapKey,

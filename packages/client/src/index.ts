@@ -19,6 +19,8 @@ export type AnimeT = Ok<'/v1/anime/:anilistId'>
 export type SourceT = Ok<'/v1/sources'>[number]
 export type EpisodesT = Ok<'/v1/anime/:anilistId/episodes'>
 export type StreamsT = Ok<'/v1/anime/:anilistId/episodes/:episode/streams'>
+export type SkipT = Ok<'/v1/anime/:anilistId/episodes/:episode/skip'>
+export type StatusT = Ok<'/v1/status'>
 export type ApiError = Err<'/v1/anime/:anilistId'>
 
 export interface ClientOptions {

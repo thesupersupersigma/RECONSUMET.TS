@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // The API service: migrations (under a lock) → HTTP server → scheduled jobs.
 import { serve } from '@hono/node-server'
-import { createAniList, createSources } from '@reconsumet/core'
+import { createAniList, createAniSkip, createSources } from '@reconsumet/core'
 import { connect, ensureApiKey, migrate, PgCatalogStore, pgCache } from '@reconsumet/db'
 import { createApp } from './app.ts'
 import { loadConfig } from './config.ts'
@@ -18,7 +18,10 @@ if (config.bootstrapKey) {
 
 const { fetcher, sources } = createSources()
 const anilist = createAniList({ fetcher, cache: pgCache(db, 'anilist') })
-const app = createApp({ config, db, sources, anilist })
+const aniskip = config.aniskipEnabled
+  ? createAniSkip({ fetcher, cache: pgCache(db, 'aniskip'), url: config.aniskipUrl })
+  : null
+const app = createApp({ config, db, sources, anilist, aniskip })
 const stopJobs = config.jobs ? startJobs({ db, fetcher, catalog: new PgCatalogStore(db), anilist, sources }) : () => {}
 
 const server = serve({ fetch: app.fetch, port: config.port }, (i) => console.log(`api listening on :${i.port}`))

@@ -42,7 +42,7 @@ try {
   )
   writeFileSync(
     join(tmp, 'check.ts'),
-    `import { createClient, type AnimeT, type EpisodesT, type StreamsT } from '@reconsumet/client'
+    `import { createClient, type AnimeT, type EpisodesT, type SkipT, type StreamsT } from '@reconsumet/client'
 
 const api = createClient('https://api.example.com', { apiKey: 'k' })
 
@@ -60,6 +60,21 @@ if (anime.ok) {
   const romaji: string | null = a.title.romaji
   // @ts-expect-error romaji may be null
   const bad: string = a.title.romaji
+  const va: string | null | undefined = a.characters[0]?.voiceActor?.name
+  const thumb: string | null = a.streamingEpisodes[0]!.thumbnail
+  // @ts-expect-error description may be null
+  const desc: string = a.description
+}
+
+const skip = await api.v1.anime[':anilistId'].episodes[':episode'].skip.$get({
+  param: { anilistId: '1', episode: '1' },
+  query: { duration: '1420' },
+})
+if (skip.ok) {
+  const k: SkipT = await skip.json()
+  const start: number | undefined = k.intro?.start
+  // @ts-expect-error source is aniskip | none
+  const src: 'x' = k.source
 }
 
 const eps = await api.v1.anime[':anilistId'].episodes.$get({ param: { anilistId: '1' }, query: {} })

@@ -34,6 +34,7 @@ beforeAll(async () => {
     db,
     sources,
     anilist: createAniList({ fetcher, cache: pgCache(db, 'anilist') }),
+    aniskip: null,
     remoteAddr: () => '127.0.0.1',
   })
   const r = createRelay(relayConfig({ RELAY_SECRET: SECRET, RELAY_ALLOWED_ORIGINS: ORIGIN }), {

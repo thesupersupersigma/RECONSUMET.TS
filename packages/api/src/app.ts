@@ -2,8 +2,9 @@ import { getConnInfo } from '@hono/node-server/conninfo'
 import { swaggerUI } from '@hono/swagger-ui'
 import { createRoute, OpenAPIHono, z } from '@hono/zod-openapi'
 import {
+  type AniList,
   AniListCapError,
-  type AniListMedia,
+  type AniSkip,
   type Audio,
   clientIp,
   createMatcher,
@@ -11,6 +12,7 @@ import {
   type Source,
   type StreamResult,
   sealToken,
+  streamingEpisodeExtras,
   trustList,
 } from '@reconsumet/core'
 import { type Db, latestHealth, PgCatalogStore, pgCache, pgMappingStore, verifyApiKey } from '@reconsumet/db'
@@ -23,7 +25,9 @@ import {
   CatalogEntrySchema,
   EpisodesSchema,
   ErrorSchema,
+  SkipSchema,
   SourceSchema,
+  StatusSchema,
   StreamsSchema,
 } from './schemas.ts'
 
@@ -44,7 +48,9 @@ export interface AppDeps {
   db: Db
   /** Sources in preference order. */
   sources: Map<string, Source>
-  anilist: { media(id: number): Promise<AniListMedia | null> }
+  anilist: Pick<AniList, 'media' | 'usage'>
+  /** null when ANISKIP_ENABLED=false. */
+  aniskip: Pick<AniSkip, 'skipTimes'> | null
   /** The socket's address (default: from @hono/node-server); tests inject one. */
   remoteAddr?: (c: Context) => string
 }
@@ -65,6 +71,7 @@ const errors = {
   404: json(ErrorSchema, 'Not found'),
   429: json(ErrorSchema, 'Rate limited'),
   502: json(ErrorSchema, 'A source or AniList failed'),
+  503: json(ErrorSchema, 'AniList budget used up and nothing cached (anilist_cap)'),
 }
 const SourceQuery = z.object({ source: z.string().optional().openapi({ example: 'reanime' }) })
 
@@ -88,7 +95,7 @@ function windows() {
 }
 
 export function createApp(deps: AppDeps) {
-  const { config, db, sources, anilist } = deps
+  const { config, db, sources, anilist, aniskip } = deps
   const catalog = new PgCatalogStore(db)
   const matcher = createMatcher({ media: anilist.media, catalog, store: pgMappingStore(db) })
   const streamCache = pgCache(db, 'streams')
@@ -104,6 +111,16 @@ export function createApp(deps: AppDeps) {
         return ''
       }
     })
+
+  /** AniList details; AniList failures that aren't the budget → 502 (stale answers are already handled inside). */
+  const details = async (anilistId: number) => {
+    const m = await anilist.media(anilistId).catch((e) => {
+      if (e instanceof AniListCapError) throw e
+      throw new ApiError(502, 'anilist', `AniList: ${(e as Error).message}`)
+    })
+    if (!m) throw new ApiError(404, 'not_found', `no anime ${anilistId} on AniList`)
+    return m
+  }
 
   const pickSources = (id: string | undefined): Source[] => {
     if (!id) return [...sources.values()]
@@ -173,6 +190,16 @@ export function createApp(deps: AppDeps) {
     .openapi(
       createRoute({
         method: 'get',
+        path: '/v1/status',
+        tags: ['meta'],
+        description: "Today's AniList usage against this instance's budgets, for self-hosters tuning them.",
+        responses: { 200: json(StatusSchema, 'Usage and limits'), 429: errors[429] },
+      }),
+      async (c) => c.json({ version: VERSION, anilist: await anilist.usage(), aniskip: !!aniskip }, 200),
+    )
+    .openapi(
+      createRoute({
+        method: 'get',
         path: '/v1/sources',
         tags: ['meta'],
         description: 'Every source with its latest health check (null until the first check ran).',
@@ -218,19 +245,20 @@ export function createApp(deps: AppDeps) {
         method: 'get',
         path: '/v1/anime/{anilistId}',
         tags: ['anime'],
-        description: 'AniList details (cached: 24 h for finished shows, 1 h otherwise).',
+        description:
+          'AniList details (fresh for 24 h for finished shows, 1 h otherwise; an expired copy is served when AniList ' +
+          'or the budget says no). `description` is AniList HTML: sanitize it. 503 anilist_cap = budget used and ' +
+          'nothing cached.',
         request: { params: AnilistIdParam },
-        responses: { 200: json(AnimeSchema, 'The anime'), 404: errors[404], 429: errors[429], 502: errors[502] },
+        responses: {
+          200: json(AnimeSchema, 'The anime'),
+          404: errors[404],
+          429: errors[429],
+          502: errors[502],
+          503: errors[503],
+        },
       }),
-      async (c) => {
-        const { anilistId } = c.req.valid('param')
-        const m = await anilist.media(anilistId).catch((e) => {
-          if (e instanceof AniListCapError) throw e
-          throw new ApiError(502, 'anilist', `AniList: ${(e as Error).message}`)
-        })
-        if (!m) throw new ApiError(404, 'not_found', `no anime ${anilistId} on AniList`)
-        return c.json(m, 200)
-      },
+      async (c) => c.json(await details(c.req.valid('param').anilistId), 200),
     )
     .openapi(
       createRoute({
@@ -259,9 +287,24 @@ export function createApp(deps: AppDeps) {
               await streamCache.set(key, show, EPISODES_CACHE_MS)
             }
             const [from, to] = m.episodeRange ?? [Number.NEGATIVE_INFINITY, Number.POSITIVE_INFINITY]
+            // titles/thumbnails from AniList's streamingEpisodes; optional, so an AniList failure costs nothing
+            const extras = streamingEpisodeExtras(
+              (await anilist.media(anilistId).catch(() => null))?.streamingEpisodes ?? [],
+            )
             const episodes = show.episodes
               .filter((e) => e.number >= from && e.number <= to)
-              .map((e) => ({ number: e.number - m.episodeOffset, title: e.title, sub: e.sub, dub: e.dub }))
+              .map((e) => {
+                const number = e.number - m.episodeOffset
+                const x = extras.get(number)
+                const title = e.title || x?.title
+                return {
+                  number,
+                  ...(title ? { title } : {}),
+                  ...(x?.thumbnail ? { thumbnail: x.thumbnail } : {}),
+                  sub: e.sub,
+                  dub: e.dub,
+                }
+              })
             return c.json({ source: s.id, showId, confidence: m.confidence, episodes }, 200)
           } catch (e) {
             errs.push(`${s.id}: ${(e as Error).message}`)
@@ -382,6 +425,45 @@ export function createApp(deps: AppDeps) {
           'no_streams',
           `no streams for AniList ${anilistId} episode ${episode} (${errs.join('; ')})`,
         )
+      },
+    )
+    .openapi(
+      createRoute({
+        method: 'get',
+        path: '/v1/anime/{anilistId}/episodes/{episode}/skip',
+        tags: ['anime'],
+        description:
+          'Opening/ending times from AniSkip (third-party, by MAL ID). For servers without their own intro/outro. ' +
+          '`duration` is the stream length in seconds: AniSkip only answers for a matching episode length. ' +
+          'source "none" = no times, no MAL ID, or AniSkip disabled.',
+        request: {
+          params: AnilistIdParam.extend({
+            episode: z.coerce
+              .number()
+              .int()
+              .positive()
+              .openapi({ param: { name: 'episode', in: 'path' }, example: 1 }),
+          }),
+          query: z.object({ duration: z.coerce.number().min(0).max(86_400).openapi({ example: 1420 }) }),
+        },
+        responses: {
+          200: json(SkipSchema, 'Skip times'),
+          400: errors[400],
+          404: errors[404],
+          429: errors[429],
+          502: errors[502],
+          503: errors[503],
+        },
+      }),
+      async (c) => {
+        const { anilistId, episode } = c.req.valid('param')
+        if (!aniskip) return c.json({ source: 'none' as const }, 200)
+        const { idMal } = await details(anilistId)
+        if (!idMal) return c.json({ source: 'none' as const }, 200)
+        const r = await aniskip.skipTimes(idMal, episode, c.req.valid('query').duration).catch((e) => {
+          throw new ApiError(502, 'aniskip', (e as Error).message)
+        })
+        return c.json(r, 200)
       },
     )
 
