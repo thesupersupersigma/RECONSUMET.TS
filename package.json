@@ -1,0 +1,12 @@
+{
+  "name": "reconsumet",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Self-hostable anime aggregator: scraping library + HTTP API with an HLS/subtitle proxy",
+  "license": "GPL-3.0-or-later",
+  "author": "thesupersupersigma",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thesupersupersigma/RECONSUMET.TS.git"
+  }
+}
