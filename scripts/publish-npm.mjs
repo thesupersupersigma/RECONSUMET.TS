@@ -37,7 +37,9 @@ try {
     try {
       let onNpm = ''
       try {
-        onNpm = execSync(`npm view ${id} version`, { stdio: 'pipe', encoding: 'utf8' }).trim()
+        // --prefer-online: skip npm's local cache. The registry can still answer stale for a few minutes after a
+        // publish, so a conflict at publish time is handled below too.
+        onNpm = execSync(`npm view ${id} version --prefer-online`, { stdio: 'pipe', encoding: 'utf8' }).trim()
       } catch {} // E404: not published yet
       if (onNpm === version) {
         console.log(`${id}: already on npm, skipped`)
@@ -48,7 +50,21 @@ try {
         .split(/\r?\n/)
         .pop()
       const flags = [values['dry-run'] && '--dry-run', values.tag && `--tag ${values.tag}`].filter(Boolean).join(' ')
-      execSync(`npm publish "${tarball}" --access public ${flags}`, { cwd: root, stdio: 'inherit' })
+      try {
+        execSync(`npm publish "${tarball}" --access public ${flags}`, {
+          cwd: root,
+          stdio: ['ignore', 'inherit', 'pipe'],
+        })
+      } catch (e) {
+        const err = String(e.stderr ?? '')
+        process.stderr.write(err)
+        // E403 "cannot publish over the previously published versions" (or EPUBLISHCONFLICT): it's already there
+        if (/cannot publish over|EPUBLISHCONFLICT/i.test(err)) {
+          console.log(`${id}: already on npm (registry view was stale), skipped`)
+          continue
+        }
+        throw e
+      }
       console.log(`${id}: ${values['dry-run'] ? 'dry run ok' : 'published'}`)
     } catch (e) {
       failed = true
