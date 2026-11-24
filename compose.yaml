@@ -3,6 +3,7 @@
 #   docker compose up -d                    # builds the images from this checkout
 #   docker compose pull && docker compose up -d   # or: use the prebuilt images from GHCR
 #   docker compose --profile caddy up -d    # + Caddy with automatic HTTPS (API_DOMAIN, RELAY_DOMAIN in .env)
+name: reconsumet
 services:
   postgres:
     image: postgres:17-bookworm

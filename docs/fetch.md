@@ -5,7 +5,7 @@ one function, `fetcher.request(url)`. It picks how to connect to each site: a no
 exactly like Chrome down to the TLS handshake for sites that block scripts. It spaces requests out so we don't hammer
 anyone, retries when a site hiccups, gives up cleanly on slow or huge responses, and tells you in plain terms when a page
 is a Cloudflare/DDoS-Guard block instead of the real site. For URLs that come from outside (the proxy), it refuses to
-connect anywhere private, so nobody can use us to reach tsss-server's internal network.
+connect anywhere private, so nobody can use us to reach the host's internal network.
 
 ## Quick start
 
@@ -129,7 +129,7 @@ Header priority: config `headers` < rule `headers` < per-call `headers`. On a re
   attempt from the first byte sent to the last body byte read, redirects included.
 - **Redirects** are followed manually (301/302/303/307/308). 303 → GET; 301/302 turn POST into GET; 307/308 keep the method.
 - **SSRF guard** (`untrusted: true`): http/https only; refuses loopback, private (RFC 1918), CGNAT `100.64.0.0/10`
-  (Tailscale, Alibaba metadata), link-local `169.254.0.0/16` (cloud metadata), multicast, reserved, IPv6 unique-local
+  (Tailscale and other CGNAT VPNs, Alibaba metadata), link-local `169.254.0.0/16` (cloud metadata), multicast, reserved, IPv6 unique-local
   (incl. AWS `fd00:ec2::254`), link-local, multicast, and IPv6 forms that embed IPv4 (mapped, NAT64, 6to4, Teredo).
   If any DNS answer is blocked, the request is refused. The connection goes to the vetted address (plain: validating
   DNS lookup inside the socket connect; impersonate: a transport pinned with `resolve`), so DNS rebinding can't swap it.

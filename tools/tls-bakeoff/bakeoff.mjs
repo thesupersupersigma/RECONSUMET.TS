@@ -6,7 +6,7 @@
 // fetch layer's classifier straight from packages/core/src as TypeScript). Run from the RECONSUMET.TS folder.
 //
 //   node tools/tls-bakeoff/bakeoff.mjs --machine pc
-//   node tools/tls-bakeoff/bakeoff.mjs --machine tsss-server --candidates rustyTLS-js,wreq-js --tests fingerprint,perf
+//   node tools/tls-bakeoff/bakeoff.mjs --machine my-server --candidates rustyTLS-js,wreq-js --tests fingerprint,perf
 //   node tools/tls-bakeoff/bakeoff.mjs --merge
 //
 // Politeness: every candidate sends at most one request per third-party host per run, hosts are visited one at a

@@ -1,6 +1,6 @@
 #!/bin/sh
 # Build rustyTLS-js (against the local rustyTLS fork) from source on Linux without sudo:
-# everything happens inside an ubuntu:22.04 container (same glibc as tsss-server), so the
+# everything happens inside an ubuntu:22.04 container (glibc 2.35, so the addon also loads on older distros), so the
 # host only needs Docker. The built addon lands in <dir>/rustyTLS-js/rust/*.node and dist/.
 #
 # usage: sh build-rustytls-js-linux.sh <dir that contains rustyTLS/ and rustyTLS-js/>

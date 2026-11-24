@@ -53,8 +53,8 @@ child links that last 6 hours, so a paused episode keeps working.
 - **Rate limits**, in one-minute windows: per IP without a key (`RATE_LIMIT_IP_PER_MIN`, default 60), per key with one
   (`RATE_LIMIT_KEY_PER_MIN`, default 600, or the key's own limit). Answers carry `ratelimit-remaining` /
   `ratelimit-reset`, and a 429 adds `retry-after`. The client IP comes from `X-Forwarded-For` **only** when the direct
-  peer is in `TRUSTED_PROXIES` (e.g. the Cloudflare Tunnel / Traefik). Otherwise anyone could fake their way to a
-  fresh limit. Limits are per process (fine for one instance).
+  peer is in `TRUSTED_PROXIES` (your reverse proxy or tunnel; `CLIENT_IP_HEADER` picks another header such as
+  `CF-Connecting-IP`). Otherwise anyone could fake their way to a fresh limit. Limits are per process (fine for one instance).
 - **Errors** always look like `{ "error": { "code": "…", "message": "…" } }`: `invalid_request` 400, `unknown_source`
   400, `bad_key` / `key_required` 401, `not_found` / `no_source` / `no_streams` 404, `rate_limited` 429, `anilist` 502,
   `anilist_cap` 503 (the daily AniList cap is used up), `internal` 500.
@@ -68,7 +68,7 @@ recorded in `job_runs` and retried at the next check.
 
 | Job | Every | Does |
 |---|---|---|
-| `catalog-update` | 7 days | re-imports the anime offline database if a new release exists (41.5k entries ≈ 26 s on tsss-server) |
+| `catalog-update` | 7 days | re-imports the anime offline database if a new release exists (41.5k entries ≈ 26 s on a 2010 Xeon) |
 | `anilist-sync` | 1 day | airing + next season + recently updated from AniList (4 requests, under the daily cap) |
 | `source-health` | 15 min | one health check per source, kept as history in `source_health` |
 | `cache-prune` | 1 day | deletes expired cache rows |
@@ -115,5 +115,5 @@ re-exported for runtime validation. Use the key on the server only, never in the
 
 ## Running it
 
-`docker compose up --build` (Postgres + API + relay, see [deploy.md](deploy.md)), or against your own Postgres:
-`pnpm build && DATABASE_URL=… PUBLIC_URL=… RELAY_PUBLIC_URL=… RELAY_SECRET=… node packages/api/dist/main.js`.
+`docker compose up -d` (Postgres + API + relay, see [self-hosting.md](self-hosting.md)), or against your own Postgres:
+`pnpm dev` with `DATABASE_URL` and `RELAY_SECRET` in `.env`.

@@ -5,7 +5,7 @@ need a special Referer header, and AniZone's only allow `anizone.to`. So every p
 goes through the **relay**: a small separate service that fetches each file from the source and passes it on to the
 viewer. The browser only ever sees `https://relay…/r/<token>.<ext>`. The token is **sealed** (encrypted and signed), so
 nobody can read which upstream URL is behind it or point it anywhere else. The relay has no database: everything it
-needs is inside the token. That's why it can move from tsss-server to a VPS by changing config only.
+needs is inside the token. That's why it can move to another machine by changing config only.
 
 ## How a stream plays
 
@@ -22,7 +22,7 @@ needs is inside the token. That's why it can move from tsss-server to a VPS by c
    headers is forwarded. Nothing is cached in 0.4.
 
 Re:Anime's HD-1 links are signed for the IP that resolved them. That works while the API and relay share
-tsss-server's IP. When the relay moves, set `RELAY_SHARES_EGRESS_WITH_API=false` on the API and HD-1 is no longer
+one public IP. When the relay moves, set `RELAY_SHARES_EGRESS_WITH_API=false` on the API and HD-1 is no longer
 offered (HD-2 works anywhere).
 
 ## Protection
@@ -32,13 +32,14 @@ offered (HD-2 works anywhere).
   `RELAY_SECRET_PREVIOUS`, then switch the API to the new secret. Remove the old one after 6 hours (child token
   lifetime).
 - **SSRF guard on every hop**: the relay uses `@reconsumet/core`'s fetcher with `untrusted: true`. Every URL and every
-  redirect is resolved and refused if it points at a private, loopback, link-local, CGNAT/Tailscale or metadata
+  redirect is resolved and refused if it points at a private, loopback, link-local, CGNAT (Tailscale and other CGNAT VPNs) or metadata
   address. The address checked is the one connected to.
 - **CORS**: a browser request with an `Origin` outside `RELAY_ALLOWED_ORIGINS` gets 403. Allowed origins get the
   CORS headers, and preflights allow `GET`/`HEAD` + `Range`. Requests without `Origin` (native players) are allowed.
 - **Limits**: at most `RELAY_MAX_STREAMS_PER_IP` (6) downloads at once per viewer IP (released on end, error and
-  client abort). Bandwidth ceilings per IP (`RELAY_IP_MBPS`, 12) and in total (`RELAY_GLOBAL_MBPS`, 32), as token
-  buckets with about one second of burst. This keeps tsss-server's 37 Mbit/s upload from being eaten by one viewer.
+  client abort). Bandwidth ceilings per IP (`RELAY_IP_MBPS`, 12) and, if set, in total (`RELAY_GLOBAL_MBPS`, off by default),
+  as token buckets with about one second of burst, so one viewer can't eat the whole upload. Sizing them:
+  [self-hosting.md](self-hosting.md#sizing-bandwidth).
   Size caps: playlists 2 MiB (and 20,000 lines), keys 64 KiB, subtitles 8 MiB, segments 64 MiB.
 - Error messages never contain the upstream URL.
 
@@ -69,4 +70,4 @@ upstream's own 404/416), `internal` 500.
   viewers** at once, more at 720p. Players fetch faster than real time while filling their buffer, so the per-IP
   ceiling (12 Mbit/s) is set at roughly twice the bitrate.
 
-Configuration: every variable is explained in [deploy.md](deploy.md).
+Configuration: every variable is explained in [self-hosting.md](self-hosting.md#every-environment-variable).
