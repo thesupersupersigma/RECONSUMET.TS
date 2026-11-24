@@ -5,7 +5,9 @@
 <p align="center">
   <a href="https://discord.gg/trvtVNWzaf"><img src="https://img.shields.io/badge/discord-join-5865F2" alt="Discord"></a>
   <img src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue" alt="License: GPL-3.0-or-later">
-  <img src="https://img.shields.io/badge/version-0.4.1-orange" alt="Version 0.4.1">
+  <img src="https://img.shields.io/badge/version-0.4.2-orange" alt="Version 0.4.2">
+  <a href="https://www.npmjs.com/package/@reconsumet/core"><img src="https://img.shields.io/npm/v/@reconsumet/core?label=%40reconsumet%2Fcore" alt="npm @reconsumet/core"></a>
+  <a href="https://www.npmjs.com/package/@reconsumet/client"><img src="https://img.shields.io/npm/v/@reconsumet/client?label=%40reconsumet%2Fclient" alt="npm @reconsumet/client"></a>
 </p>
 
 # RECONSUMΣT.TS — v2 (rewrite in progress)
@@ -13,7 +15,7 @@
 A self-hostable anime aggregator: a TypeScript scraping library plus an HTTP API with a built-in HLS + subtitle proxy.
 It turns an AniList ID and an episode number into playable streams from whichever sources currently work.
 
-**Status: v0.4.1 — API + relay, self-hostable by anyone.** v2 is being rewritten from scratch. RECONSUMΣT.TS is now a service: an HTTP API
+**Status: v0.4.2 — API + relay, self-hostable by anyone; library and typed client on npm.** v2 is being rewritten from scratch. RECONSUMΣT.TS is now a service: an HTTP API
 (Hono, OpenAPI at `/docs`, API keys, rate limits, scheduled jobs, Postgres) that turns an AniList ID + episode number into
 streams from **Re:Anime** and **AniZone**, and a separate **video relay** that serves every playlist, segment and
 subtitle behind sealed, short-lived links ([docs/api.md](docs/api.md), [docs/relay.md](docs/relay.md),
@@ -23,11 +25,11 @@ anime catalog + AniList client ([docs/catalog.md](docs/catalog.md)) and the fetc
 
 | Package | What |
 |---|---|
-| `@reconsumet/core` | library: fetch layer, catalog, AniList client, sources, matching, relay tokens |
+| `@reconsumet/core` | library: fetch layer, catalog, AniList client, sources, matching, relay tokens (on npm) |
 | `@reconsumet/db` | Postgres schema, migrations and stores (Drizzle) |
 | `@reconsumet/api` | the HTTP API + jobs (Docker target `api`) |
 | `@reconsumet/relay` | the video/subtitle relay (Docker target `relay`) |
-| `@reconsumet/client` | typed API client for the site |
+| `@reconsumet/client` | typed API client for the site (on npm) |
 
 The previous version (v1, June–August 2026) is kept on the [`old`](../../tree/old) branch.
 
@@ -41,13 +43,55 @@ git clone https://github.com/thesupersupersigma/RECONSUMET.TS.git && cd RECONSUM
 cp .env.example .env                 # set POSTGRES_PASSWORD and RELAY_SECRET (openssl rand -base64 32)
 docker compose up -d                 # Postgres + API + relay; add --profile caddy for automatic HTTPS
 curl http://localhost:8080/v1/health # API docs: http://localhost:8080/docs
-docker compose exec api node dist/cli.js keys create mysite
+docker compose exec api node dist/cli.js keys create mysite   # or set API_BOOTSTRAP_KEY in .env
 ```
 
 Prebuilt images (`linux/amd64`, `linux/arm64`): `ghcr.io/thesupersupersigma/reconsumet-api` and
 `ghcr.io/thesupersupersigma/reconsumet-relay` (`docker compose pull`). HTTPS, reverse proxies, Cloudflare, bandwidth,
 upgrades and backups: **[docs/self-hosting.md](docs/self-hosting.md)**. An optional Coolify example:
 [docs/deploy/coolify.md](docs/deploy/coolify.md).
+
+## Use as a library
+
+```sh
+npm i @reconsumet/core
+```
+
+```ts
+import { createSources } from '@reconsumet/core'
+
+const { fetcher, sources } = createSources()
+const reanime = sources.get('reanime')!
+const [hit] = await reanime.search('frieren')
+const show = await reanime.getShow(hit!.id)
+const { servers } = await reanime.getStreams(show.episodes[0]!.id, { audio: 'sub' })
+await fetcher.close()
+```
+
+Sources and AniList matching, the catalog and the fetch layer: [docs/sources.md](docs/sources.md),
+[docs/catalog.md](docs/catalog.md), [docs/fetch.md](docs/fetch.md). CLI: `npx @reconsumet/core --help`.
+
+## Typed client
+
+For a site (or anything server-side) that talks to a RECONSUMΣT.TS API:
+
+```sh
+npm i @reconsumet/client
+```
+
+```ts
+import { createClient } from '@reconsumet/client'
+
+const api = createClient('https://api.example.com', { apiKey: process.env.RECONSUMET_API_KEY })
+const res = await api.v1.anime[':anilistId'].episodes[':episode'].streams.$get({
+  param: { anilistId: '154587', episode: '1' },
+  query: { audio: 'sub' },
+})
+if (res.ok) console.log((await res.json()).servers[0]?.streams[0]?.url)
+```
+
+Every route and response is typed, and the key stays on your server. Details: [docs/api.md](docs/api.md#the-typed-client).
+Releasing to npm (maintainers): [docs/publishing.md](docs/publishing.md).
 
 ## Development
 
