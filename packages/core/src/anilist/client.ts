@@ -2,7 +2,7 @@
 // database (AniList's terms forbid mass collection). Disk cache + a daily request cap + their rate-limit headers.
 import { join } from 'node:path'
 import type { CatalogEntry, CatalogStore } from '../catalog/types.ts'
-import { DiskCache, readJson, writeJson } from '../data.ts'
+import { DiskCache } from '../data.ts'
 import type { Fetcher } from '../fetch/index.ts'
 
 export const ANILIST_URL = 'https://graphql.anilist.co'
@@ -72,10 +72,15 @@ export class AniListError extends Error {
   }
 }
 
+/** Where AniList answers + the daily usage counter are kept: DiskCache (CLI) or a Postgres table (API). */
+export type AniListCache = Pick<DiskCache, 'get' | 'set'>
+
 export interface AniListOptions {
   fetcher: Fetcher
-  /** Cache + usage counter live here (the data dir). */
-  dir: string
+  /** Default: a DiskCache in `<dir>/cache/anilist`. */
+  cache?: AniListCache
+  /** The data dir, when no cache is given. */
+  dir?: string
   /** Requests per UTC day, cache hits excluded. Default 300 (env RECONSUMET_ANILIST_DAILY_CAP). */
   dailyCap?: number
   /** Override the clock (tests). */
@@ -87,24 +92,22 @@ export interface AniListOptions {
 const HOUR = 3_600_000
 
 export function createAniList(opts: AniListOptions) {
-  const { fetcher, dir } = opts
+  const { fetcher } = opts
   const cap = opts.dailyCap ?? Number(process.env.RECONSUMET_ANILIST_DAILY_CAP || 300)
   const now = opts.now ?? (() => new Date())
   const sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)))
-  const cache = new DiskCache(join(dir, 'cache', 'anilist'))
-  const usageFile = join(dir, 'anilist-usage.json')
+  const cache = opts.cache ?? new DiskCache(join(opts.dir ?? '.', 'cache', 'anilist'))
   let pauseUntil = 0
 
   async function usage() {
     const day = now().toISOString().slice(0, 10)
-    const u = await readJson<{ day: string; count: number }>(usageFile)
-    return { day, count: u?.day === day ? u.count : 0, cap }
+    return { day, count: (await cache.get<number>(`usage:${day}`)) ?? 0, cap }
   }
 
   async function gql<T>(query: string, variables: Record<string, unknown>): Promise<T> {
     const u = await usage()
     if (u.count >= cap) throw new AniListCapError(`AniList daily cap reached (${u.count}/${cap} on ${u.day})`)
-    await writeJson(usageFile, { day: u.day, count: u.count + 1 })
+    await cache.set(`usage:${u.day}`, u.count + 1, 2 * 24 * HOUR)
     const wait = pauseUntil - Date.now()
     if (wait > 0) await sleep(wait)
 
@@ -148,9 +151,12 @@ export function createAniList(opts: AniListOptions) {
     },
 
     async search(q: string, perPage = 10): Promise<AniListMedia[]> {
-      return cache.wrap(`search:${perPage}:${q.toLowerCase()}`, 6 * HOUR, async () => {
-        return (await gql<{ Page: { media: AniListMedia[] } }>(Q_SEARCH, { q, perPage })).Page.media
-      })
+      const key = `search:${perPage}:${q.toLowerCase()}`
+      const hit = await cache.get<AniListMedia[]>(key)
+      if (hit) return hit
+      const media = (await gql<{ Page: { media: AniListMedia[] } }>(Q_SEARCH, { q, perPage })).Page.media
+      await cache.set(key, media, 6 * HOUR)
+      return media
     },
 
     /**

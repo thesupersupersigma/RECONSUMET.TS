@@ -2,7 +2,7 @@ import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { AniListMedia } from '../src/anilist/client.ts'
-import { createMatcher, queriesFor, stripStructure } from '../src/match/index.ts'
+import { createMatcher, fileMappingStore, queriesFor, stripStructure } from '../src/match/index.ts'
 import { normalizeTitle, parseTitle, similarity } from '../src/match/title.ts'
 import type { Source } from '../src/sources/types.ts'
 import { fixture, tempDir } from './helpers.ts'
@@ -58,7 +58,7 @@ describe('createMatcher', () => {
       episodeId: (s: string, n: number) => `${s}/${n}`,
     } as unknown as Source
     const m = await media()
-    const matcher = createMatcher({ media: async () => m, catalog: { get: async () => undefined }, dir })
+    const matcher = createMatcher({ media: async () => m, catalog: { get: async () => undefined }, store: fileMappingStore(dir) })
 
     const first = await matcher.match(119661, source)
     expect(first).toMatchObject({ showId: 'abc', episodeOffset: 0 })
@@ -84,7 +84,7 @@ describe('createMatcher', () => {
       search: async () => [{ id: 'x', title: 'Totally Different Show', altTitles: [], type: 'TV', year: 2021, episodes: 12 }],
     }
     const m = await media()
-    const matcher = createMatcher({ media: async () => m, catalog: { get: async () => undefined }, dir: await tempDir() })
+    const matcher = createMatcher({ media: async () => m, catalog: { get: async () => undefined }, store: fileMappingStore(await tempDir()) })
     const r = await matcher.match(119661, source)
     expect(r.showId).toBeNull()
     expect(r.reasons[0]).toMatch(/scored .* < 0\.65/)

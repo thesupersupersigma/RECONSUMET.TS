@@ -5,3 +5,4 @@ export { decodePlaylist, extractFlixCloud, FLIXCLOUD_HEADERS } from './extractor
 export * from './fetch/index.ts'
 export * from './match/index.ts'
 export * from './sources/index.ts'
+export * from './token.ts'

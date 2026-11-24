@@ -5,7 +5,7 @@ import { createAniList } from '../anilist/client.ts'
 import { FileCatalogStore } from '../catalog/file-store.ts'
 import { updateOfflineDb } from '../catalog/offline-db.ts'
 import { dataDir } from '../data.ts'
-import { createMatcher } from '../match/index.ts'
+import { createMatcher, fileMappingStore } from '../match/index.ts'
 import { createSources, getSourceDefinition } from '../sources/registry.ts'
 import type { Source } from '../sources/types.ts'
 
@@ -64,7 +64,7 @@ async function main() {
   })
   const catalog = new FileCatalogStore(dataDir())
   const anilist = createAniList({ fetcher, dir: dataDir() })
-  const matcher = createMatcher({ media: anilist.media, catalog, dir: dataDir() })
+  const matcher = createMatcher({ media: anilist.media, catalog, store: fileMappingStore(dataDir()) })
   const source = (id: string | undefined) => {
     if (!id) throw new Error(`which source? (${[...sources.keys()].join(', ')})`)
     getSourceDefinition(id)
