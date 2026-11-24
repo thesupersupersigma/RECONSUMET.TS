@@ -125,7 +125,9 @@ The anime catalog is derived from
 [manami-project/anime-offline-database](https://github.com/manami-project/anime-offline-database), licensed under the
 [ODbL 1.0](https://opendatacommons.org/licenses/odbl/1-0/) with contents under the
 [DbCL 1.0](https://opendatacommons.org/licenses/dbcl/1-0/) (details in [docs/catalog.md](docs/catalog.md)). Show
-metadata also comes from [AniList](https://anilist.co).
+metadata also comes from [AniList](https://anilist.co). Opening/ending skip times come from
+[AniSkip](https://github.com/aniskip/aniskip-api), a third-party, crowd-sourced service (`ANISKIP_ENABLED=false` turns
+it off).
 
 ## License
 

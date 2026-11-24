@@ -66,17 +66,32 @@ blob that answers 304). If a server ignores that, the file's own `lastUpdate` is
 
 ```ts
 const anilist = createAniList({ fetcher, dir: dataDir() })
-await anilist.media(119661)        // titles, synonyms, format, episodes, dates, status, relations, MAL ID, next airing
+await anilist.media(154587)        // everything the anime/watch pages show (docs/api.md), incl. relations + MAL ID
 await anilist.search('frieren')
 await anilist.sync(catalogStore)   // the small sync
-await anilist.usage()              // { day, count, cap }
+await anilist.usage()              // { day, count, cap, lastMinute, perMinute, sync: { count, cap }, pausedUntil }
 ```
 
 - Goes through the fetcher's `plain` tier; host rule `ANILIST_HOST_RULE` = 1 request per 2 s (AniList's current limit
   is 30/minute). Queries are POSTs but read-only, so they're retried, honouring `Retry-After` on 429.
-- When `X-RateLimit-Remaining` reaches 1, the next call waits until `X-RateLimit-Reset`.
-- **Daily cap:** `RECONSUMET_ANILIST_DAILY_CAP` (default 300) requests per UTC day; cache hits don't count. Past it,
+- When `X-RateLimit-Remaining` reaches 1, or AniList answers 429, every caller backs off until `X-RateLimit-Reset` /
+  `Retry-After`. Page lookups don't wait for it (they get the cached answer or an error); the sync waits.
+- **Two budgets.** Page lookups (`media`, `search`) get `RECONSUMET_ANILIST_PER_MIN` (default 20) per minute and
+  `RECONSUMET_ANILIST_DAILY_CAP` (default 3000) per UTC day. The daily sync has its own budget of 20 requests a day
+  (it needs 4), so it never eats the page budget, and a bug in it can't either. Cache hits never count. Past a budget,
   calls throw `AniListCapError`.
-- **Cache:** `media` 24 h when the show is finished, 1 h otherwise (a "not found" is cached too); `search` 6 h.
+- **Why these numbers:** AniList allows 30 requests/minute per IP right now (90 normally). 20/minute leaves room for the
+  sync and for retries, so we stay under their limit. A details answer stays fresh 1–24 h, so 3000/day covers about
+  3000 different anime a day, far more than one site's visitors open. Repeat views of an anime are cache hits.
+- **Tuning:** raise `RECONSUMET_ANILIST_PER_MIN` only if AniList is back to 90/minute, and never above their limit.
+  Lower both if other AniList users share your IP. `GET /v1/status` shows today's usage.
+- **Stale beats error:** a details answer is kept 30 days after it stops being fresh. When AniList is down or a budget is
+  used up, that old answer is served, and the next lookup tries AniList again.
+- **Concurrent lookups** of the same anime share one request.
+- **AniList's terms:** this is ordinary per-view use with caching: one request when someone opens an anime nobody
+  opened recently. We never page through AniList's database (the catalog comes from the offline database; the sync is
+  4 pages a day).
+- **Cache:** `media` fresh 24 h when the show is finished, 1 h otherwise (a "not found" is cached too); `search` 6 h.
 - **Sync:** 2 pages of currently airing + 1 page of next season + 1 page of recently updated, 50 per page, merged
-  into the catalog. That's 4 requests a day.
+  into the catalog. That's 4 requests a day. Synced entries carry AniList's `isAdult`; imported ones get `isAdult`
+  from the offline database's `hentai` tag (`/v1/search` returns it so the site can hide adult titles by default).

@@ -14,16 +14,58 @@ The full machine-readable contract is at **`/openapi.json`**, with a browsable U
 | Route | Key needed | What it returns |
 |---|---|---|
 | `GET /v1/health` | no | `{ ok, version }` |
+| `GET /v1/status` | no | today's AniList usage against the budgets, and whether AniSkip is on |
 | `GET /v1/sources` | no | every source in preference order + its latest health check |
 | `GET /v1/search?q=&limit=` | no | catalog entries (offline database + daily AniList sync), best match first |
-| `GET /v1/anime/:anilistId` | no | AniList details incl. relations (cached 24 h when finished, 1 h otherwise) |
-| `GET /v1/anime/:anilistId/episodes?source=` | no | episodes on one source in **AniList numbering** (split-cour offsets applied) |
+| `GET /v1/anime/:anilistId` | no | AniList details for the anime and watch pages (below; fresh 24 h when finished, 1 h otherwise) |
+| `GET /v1/anime/:anilistId/episodes?source=` | no | episodes on one source in **AniList numbering** (split-cour offsets applied), with AniList titles/thumbnails where it has them |
+| `GET /v1/anime/:anilistId/episodes/:ep/skip?duration=` | no | opening/ending times from AniSkip (below) |
 | `GET /v1/anime/:anilistId/episodes/:ep/streams?source=&audio=sub\|dub&viewerIp=` | **yes** | servers → streams + subtitles, every URL a relay URL |
 
 Without `source`, the first source in preference order that has the show answers (Re:Anime, then AniZone).
 
 `viewerIp` (key callers only): the site can pass the IP of the viewer it is serving. The relay then refuses that link
 from any other address. Off by default: phones switching between Wi-Fi and mobile data change IP mid-episode.
+
+### Anime details
+
+One AniList request per anime (≈ 16 KB for a movie, 28 KB for Frieren, 66 KB for One Piece with its 65 relations;
+measured 2026-11-24). Besides titles, format, dates, cover, next airing and relations, an answer has:
+
+| Field | Notes |
+|---|---|
+| `description` | **AniList's HTML as given. Sanitize it before rendering** (it's third-party text). Can be null. |
+| `bannerImage` | can be null |
+| `coverImage` | `{ extraLarge, large, medium, color }`, each can be null; `color` is `#rrggbb` |
+| `genres`, `tags` | tags: `{ name, rank, isSpoiler, isAdult }`; hide spoiler tags by default |
+| `averageScore`, `meanScore`, `popularity`, `favourites` | numbers or null (scores are 0–100) |
+| `studios` | `{ id, name, isAnimationStudio, isMain }`, main studios first |
+| `source`, `countryOfOrigin`, `hashtag`, `siteUrl` | can be null |
+| `isAdult` | boolean |
+| `trailer` | `{ site: "youtube" \| "dailymotion", id, thumbnail }` or null |
+| `characters` | first 12, MAIN first: `{ id, name, nameNative, image, role, voiceActor, voiceActorEnglish }`; the voice actors are `{ id, name, nameNative, image }` (Japanese / English) or null |
+| `recommendations` | first 12 by rating: `{ id, title, format, episodes, averageScore, coverImage: { large } }` |
+| `relations.edges[].node` | now also `coverImage: { large }` and `averageScore` |
+| `externalLinks` | `{ site, url, type: INFO \| STREAMING \| SOCIAL, language }`, for "watch legally" links |
+| `streamingEpisodes` | `{ title, thumbnail, url, site }` as AniList lists them (often Crunchyroll, not every episode) |
+
+When AniList or the budget says no, the last answer is served even if it has expired (kept 30 days). Only when nothing
+is cached is it a 503 `anilist_cap` (or 502 `anilist` if AniList itself failed).
+
+### Episodes
+
+Items are `{ number, title?, thumbnail?, sub?, dub? }`. `title` is the source's; when the source has none, AniList's
+`streamingEpisodes` fill it in, matched by the number in their titles ("Episode 5 - …"; a number listed twice with
+different titles is skipped). `thumbnail` comes from the same match. Nothing is made up: no match, no field.
+
+### Skip times
+
+`GET /v1/anime/:id/episodes/:ep/skip?duration=<seconds>` → `{ intro?: { start, end }, outro?: { start, end }, source:
+"aniskip" | "none" }`. From [AniSkip](https://github.com/aniskip/aniskip-api) (third-party, crowd-sourced, by MAL ID).
+`duration` is the length of the stream the viewer is playing: AniSkip only answers for an episode of about that
+length, so the times fit that cut. `none` = no times, the anime has no MAL ID, or `ANISKIP_ENABLED=false`. Answers are
+cached 7 days, misses 6 hours, per MAL ID + episode + rounded duration. Use it only when the stream's server has no
+`intro`/`outro` of its own.
 
 ### A streams answer
 
@@ -58,7 +100,7 @@ child links that last 6 hours, so a paused episode keeps working.
   `CF-Connecting-IP`). Otherwise anyone could fake their way to a fresh limit. Limits are per process (fine for one instance).
 - **Errors** always look like `{ "error": { "code": "…", "message": "…" } }`: `invalid_request` 400, `unknown_source`
   400, `bad_key` / `key_required` 401, `not_found` / `no_source` / `no_streams` 404, `rate_limited` 429, `anilist` 502,
-  `anilist_cap` 503 (the daily AniList cap is used up), `internal` 500.
+  `aniskip` 502, `anilist_cap` 503 (an AniList budget is used up and nothing is cached), `internal` 500.
 - `PUBLIC_URL` and `RELAY_PUBLIC_URL` come from config, never from the request's `Host` header (a v1 lesson).
 
 ## Jobs
@@ -70,7 +112,7 @@ recorded in `job_runs` and retried at the next check.
 | Job | Every | Does |
 |---|---|---|
 | `catalog-update` | 7 days | re-imports the anime offline database if a new release exists (41.5k entries ≈ 26 s on a 2010 Xeon) |
-| `anilist-sync` | 1 day | airing + next season + recently updated from AniList (4 requests, under the daily cap) |
+| `anilist-sync` | 1 day | airing + next season + recently updated from AniList (4 requests, from the sync's own budget) |
 | `source-health` | 15 min | one health check per source, kept as history in `source_health` |
 | `cache-prune` | 1 day | deletes expired cache rows |
 

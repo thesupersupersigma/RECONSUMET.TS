@@ -215,7 +215,10 @@ node --env-file=.env packages/api/dist/cli.js keys create dev
 | `RATE_LIMIT_IP_PER_MIN` | 60 | requests/minute per IP without a key |
 | `RATE_LIMIT_KEY_PER_MIN` | 600 | requests/minute per key (a key can have its own limit) |
 | `JOBS_ENABLED` | true | run the catalog / AniList / health / cache jobs in this process |
-| `RECONSUMET_ANILIST_DAILY_CAP` | 300 | AniList requests per UTC day (cache hits don't count) |
+| `RECONSUMET_ANILIST_DAILY_CAP` | 3000 | AniList page lookups per UTC day (cache hits don't count; the daily sync has its own budget) |
+| `RECONSUMET_ANILIST_PER_MIN` | 20 | AniList page lookups per minute (AniList allows 30/minute right now); see [catalog.md](catalog.md) |
+| `ANISKIP_ENABLED` | true | opening/ending times from AniSkip (third-party); `false` = never asks it |
+| `ANISKIP_URL` | `https://api.aniskip.com` | another AniSkip-compatible server |
 | `API_BOOTSTRAP_KEY` | empty | an API key (≥ 32 characters) created on start if missing; only its hash is stored |
 | `API_BOOTSTRAP_KEY_NAME` | `bootstrap` | its name in `keys list` |
 | `API_BOOTSTRAP_KEY_RPM` | empty | its own requests/minute (empty = `RATE_LIMIT_KEY_PER_MIN`) |
