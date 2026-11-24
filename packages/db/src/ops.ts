@@ -16,6 +16,17 @@ export async function createApiKey(db: Db, name: string, rateLimit: number | nul
   return { id: row!.id, key }
 }
 
+/** Makes sure a key with this value exists (only its hash is stored). True if it was created now; an existing or
+ * revoked key is left alone, so a revocation sticks across restarts. */
+export async function ensureApiKey(db: Db, name: string, key: string, rateLimit: number | null = null) {
+  const rows = await db.orm
+    .insert(apiKeys)
+    .values({ name, keyHash: sha256(key), rateLimit })
+    .onConflictDoNothing({ target: apiKeys.keyHash })
+    .returning({ id: apiKeys.id })
+  return rows.length > 0
+}
+
 /** null if unknown or revoked. */
 export async function verifyApiKey(db: Db, key: string) {
   const [row] = await db.orm

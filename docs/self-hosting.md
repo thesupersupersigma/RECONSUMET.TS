@@ -42,6 +42,9 @@ The API applies its database migrations on every start, then imports the anime c
   is gitignored.
 - **API keys** are for your site's server (never put one in browser code). Only a hash is stored:
   `docker compose exec api node dist/cli.js keys create <name> [requestsPerMinute]`, `keys list`, `keys revoke <id>`.
+  **Or with no command at all:** put a key you generate yourself in `.env` as `API_BOOTSTRAP_KEY=` (at least 32
+  characters, `openssl rand -base64 32`); the API creates it on start if it doesn't exist yet and leaves it alone
+  after that. Give the same value to your site. Useful when one compose file starts the API and the site together.
   The streams route needs a key unless `REQUIRE_KEY_FOR_STREAMS=false`.
 - **Rotating `RELAY_SECRET`:** set the relay's `RELAY_SECRET=<new>` and `RELAY_SECRET_PREVIOUS=<old>`, restart it;
   then give the API the new `RELAY_SECRET`, restart it; after 6 hours (`RELAY_CHILD_TTL_MIN`) drop
@@ -212,6 +215,9 @@ node --env-file=.env packages/api/dist/cli.js keys create dev
 | `RATE_LIMIT_KEY_PER_MIN` | 600 | requests/minute per key (a key can have its own limit) |
 | `JOBS_ENABLED` | true | run the catalog / AniList / health / cache jobs in this process |
 | `RECONSUMET_ANILIST_DAILY_CAP` | 300 | AniList requests per UTC day (cache hits don't count) |
+| `API_BOOTSTRAP_KEY` | empty | an API key (≥ 32 characters) created on start if missing; only its hash is stored |
+| `API_BOOTSTRAP_KEY_NAME` | `bootstrap` | its name in `keys list` |
+| `API_BOOTSTRAP_KEY_RPM` | empty | its own requests/minute (empty = `RATE_LIMIT_KEY_PER_MIN`) |
 
 **Relay**
 

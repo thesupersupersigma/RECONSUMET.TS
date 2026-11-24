@@ -2,6 +2,7 @@ export { PgCatalogStore } from './catalog.ts'
 export { connect, connectPglite, type Db, migrate, type Orm } from './db.ts'
 export {
   createApiKey,
+  ensureApiKey,
   lastJobRuns,
   latestHealth,
   listApiKeys,

@@ -46,7 +46,8 @@ child links that last 6 hours, so a paused episode keeps working.
 ## Keys, limits, errors
 
 - **API keys** are for server-to-server callers such as the site. Send `x-api-key: rk_…` (or `Authorization: Bearer
-  rk_…`). Only a SHA-256 hash is stored. Create, list and revoke them with the CLI (below). A wrong or revoked key is
+  rk_…`). Only a SHA-256 hash is stored. Create, list and revoke them with the CLI, or let the API create one from
+  `API_BOOTSTRAP_KEY` (both below). A wrong or revoked key is
   always a 401, even on routes that don't need one.
 - **Streams need a key** by default (`REQUIRE_KEY_FOR_STREAMS=true`), so nobody can use the API as a free video
   resolver. Metadata routes are open.
@@ -95,6 +96,11 @@ reconsumet-api keys list
 reconsumet-api keys revoke 3
 ```
 
+Or without any command: set `API_BOOTSTRAP_KEY` (at least 32 characters, e.g. `openssl rand -base64 32`) and the API
+makes sure that key exists on every start (named `API_BOOTSTRAP_KEY_NAME`, default `bootstrap`, with
+`API_BOOTSTRAP_KEY_RPM` requests/minute if set). Only its hash is stored and the value is never logged. If it already
+exists nothing changes; a revoked bootstrap key stays revoked (to replace it, set a new value).
+
 ## The typed client
 
 ```ts
@@ -110,8 +116,10 @@ if (res.ok) {
 }
 ```
 
-Routes, parameters and response types come from the API's Hono app type. The zod schemas (`StreamsSchema`, …) are
-re-exported for runtime validation. Use the key on the server only, never in the browser.
+`npm i @reconsumet/client` (its only dependency is `hono`). Routes, parameters and response types come from the API's
+Hono app type, baked into the package's own `.d.ts` when it is built, so installing it never pulls in the server. It
+exports types only (`CatalogEntryT`, `AnimeT`, `SourceT`, `EpisodesT`, `StreamsT`, `ApiError`, `ApiSchema`), no zod
+schemas. Use the client version that matches the server. Use the key on the server only, never in the browser.
 
 ## Running it
 

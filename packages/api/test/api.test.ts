@@ -202,6 +202,10 @@ describe('config', () => {
     expect(() => loadConfig({ ...base, RELAY_SECRET: 'short' })).toThrow(/RELAY_SECRET/)
     expect(() => loadConfig({ ...base, RELAY_SECRET: SECRET, PUBLIC_URL: '/api' })).toThrow(/PUBLIC_URL/)
     expect(() => loadConfig({ RELAY_SECRET: SECRET })).toThrow(/DATABASE_URL/)
+    expect(() => loadConfig({ ...base, RELAY_SECRET: SECRET, API_BOOTSTRAP_KEY: 'short' })).toThrow(/API_BOOTSTRAP_KEY/)
+    expect(() =>
+      loadConfig({ ...base, RELAY_SECRET: SECRET, API_BOOTSTRAP_KEY: SECRET, API_BOOTSTRAP_KEY_RPM: '-1' }),
+    ).toThrow(/API_BOOTSTRAP_KEY_RPM/)
   })
 
   it('starts with only DATABASE_URL and RELAY_SECRET', async () => {
@@ -210,5 +214,6 @@ describe('config', () => {
     expect(c.publicUrl).toBe('http://localhost:9000')
     expect(c.relayPublicUrl).toBe('http://localhost:8081')
     expect(c.clientIpHeader).toBe('x-forwarded-for')
+    expect(c.bootstrapKey).toBeNull()
   })
 })

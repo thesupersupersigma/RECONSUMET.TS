@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   connectPglite,
   createApiKey,
+  ensureApiKey,
   lastJobRuns,
   latestHealth,
   listApiKeys,
@@ -123,6 +124,20 @@ describe('api keys', () => {
       ['bot', false],
     ])
     expect(list[1]?.lastUsedAt).toBeInstanceOf(Date)
+  })
+
+  it('ensureApiKey (API_BOOTSTRAP_KEY): created once, idempotent across restarts, a revocation sticks', async () => {
+    const db = await freshDb()
+    const key = 'b'.repeat(44)
+    expect(await ensureApiKey(db, 'bootstrap', key, 1200)).toBe(true)
+    expect(await ensureApiKey(db, 'bootstrap', key, 1200)).toBe(false)
+    expect(JSON.stringify(await db.orm.select().from(schema.apiKeys))).not.toContain(key)
+    const v = await verifyApiKey(db, key)
+    expect(v).toMatchObject({ name: 'bootstrap', rateLimit: 1200 })
+    expect(await listApiKeys(db)).toHaveLength(1)
+    await revokeApiKey(db, v!.id)
+    expect(await ensureApiKey(db, 'bootstrap', key)).toBe(false)
+    expect(await verifyApiKey(db, key)).toBeNull()
   })
 })
 

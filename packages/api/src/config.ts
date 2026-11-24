@@ -19,6 +19,8 @@ export interface ApiConfig {
   ipPerMin: number
   keyPerMin: number
   jobs: boolean
+  /** API_BOOTSTRAP_KEY: a key that must exist (created on start if missing), for setups with no CLI step. */
+  bootstrapKey: { key: string; name: string; rateLimit: number | null } | null
 }
 
 const bool = (v: string | undefined, dflt: boolean) => (v === undefined || v === '' ? dflt : /^(1|true|yes)$/i.test(v))
@@ -43,6 +45,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
   if (relaySecret.length < 32)
     throw new Error('RELAY_SECRET is required (at least 32 characters, see docs/self-hosting.md)')
   if (!env.DATABASE_URL) throw new Error('DATABASE_URL is required')
+  const bootstrapKey = env.API_BOOTSTRAP_KEY ?? ''
+  if (bootstrapKey && bootstrapKey.length < 32)
+    throw new Error('API_BOOTSTRAP_KEY must be at least 32 characters (openssl rand -base64 32), or empty')
   const port = num(env, 'PORT', 8080)
   return {
     databaseUrl: env.DATABASE_URL,
@@ -58,5 +63,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     ipPerMin: num(env, 'RATE_LIMIT_IP_PER_MIN', 60),
     keyPerMin: num(env, 'RATE_LIMIT_KEY_PER_MIN', 600),
     jobs: bool(env.JOBS_ENABLED, true),
+    bootstrapKey: bootstrapKey
+      ? {
+          key: bootstrapKey,
+          name: env.API_BOOTSTRAP_KEY_NAME?.trim() || 'bootstrap',
+          rateLimit: env.API_BOOTSTRAP_KEY_RPM ? num(env, 'API_BOOTSTRAP_KEY_RPM', 1) : null,
+        }
+      : null,
   }
 }
