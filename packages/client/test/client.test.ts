@@ -11,7 +11,7 @@ describe('client', () => {
     const api = createClient('https://api.example.org', { apiKey: key, fetch })
 
     const health = await api.v1.health.$get()
-    expect(await health.json()).toEqual({ ok: true, version: '0.4.0' })
+    expect(await health.json()).toEqual({ ok: true, version: '0.4.1' })
 
     const res = await api.v1.anime[':anilistId'].episodes[':episode'].streams.$get({
       param: { anilistId: '1', episode: '1' },

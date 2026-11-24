@@ -10,7 +10,7 @@ const get = (app: Awaited<ReturnType<typeof setup>>['app'], path: string, header
 describe('meta routes', () => {
   it('health, OpenAPI document and docs UI', async () => {
     const { app } = await setup()
-    expect(await (await get(app, '/v1/health')).json()).toEqual({ ok: true, version: '0.4.0' })
+    expect(await (await get(app, '/v1/health')).json()).toEqual({ ok: true, version: '0.4.1' })
     const doc = (await (await get(app, '/openapi.json', { host: 'evil.example' })).json()) as {
       servers: { url: string }[]
       paths: Record<string, unknown>

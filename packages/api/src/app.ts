@@ -27,7 +27,7 @@ import {
   StreamsSchema,
 } from './schemas.ts'
 
-export const VERSION = '0.4.0'
+export const VERSION = '0.4.1'
 
 export class ApiError extends Error {
   readonly status: 400 | 401 | 403 | 404 | 429 | 502 | 503
