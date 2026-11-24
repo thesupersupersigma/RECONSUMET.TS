@@ -1,0 +1,151 @@
+{
+ "lastUpdate": "2026-07-04",
+ "license": {
+  "name": "Open Data Commons Open Database License (ODbL) v1.0 + Database Contents License (DbCL) v1.0",
+  "url": "https://github.com/manami-project/anime-offline-database/blob/2026-27/LICENSE"
+ },
+ "data": [
+  {
+   "sources": [
+    "https://anidb.net/anime/17196",
+    "https://anilist.co/anime/145064",
+    "https://anime-planet.com/anime/jujutsu-kaisen-season-2",
+    "https://animecountdown.com/1847578",
+    "https://animenewsnetwork.com/encyclopedia/anime.php?id=25346",
+    "https://anisearch.com/anime/17085",
+    "https://kitsu.app/anime/45857",
+    "https://livechart.me/anime/11083",
+    "https://myanimelist.net/anime/51009",
+    "https://simkl.com/anime/1847578"
+   ],
+   "title": "Jujutsu Kaisen 2nd Season",
+   "type": "TV",
+   "episodes": 23,
+   "status": "FINISHED",
+   "animeSeason": {
+    "season": "SUMMER",
+    "year": 2023
+   },
+   "picture": "https://cdn.myanimelist.net/images/anime/1792/138022.jpg",
+   "thumbnail": "https://cdn.myanimelist.net/images/anime/1792/138022t.jpg",
+   "duration": {
+    "value": 1380,
+    "unit": "SECONDS"
+   },
+   "score": {
+    "arithmeticGeometricMean": 8.47817065673387,
+    "arithmeticMean": 8.484593279736137,
+    "median": 8.7
+   },
+   "synonyms": [
+    "Curse Return 2",
+    "Curse of the Dead 2",
+    "JJK",
+    "JJK (2023)",
+    "JJK2",
+    "JUJUTSU KAISEN Season 2",
+    "Jujutsu Kaisen",
+    "Jujutsu Kaisen (2023)"
+   ],
+   "studios": [
+    "mappa co., ltd."
+   ],
+   "producers": [],
+   "relatedAnime": [],
+   "tags": [
+    "action",
+    "action drama",
+    "alternate dimension"
+   ]
+  },
+  {
+   "sources": [
+    "https://anidb.net/anime/11394",
+    "https://anime-planet.com/anime/20-dai-no-heya-hen",
+    "https://animecountdown.com/1572807",
+    "https://anisearch.com/anime/10587",
+    "https://kitsu.app/anime/10236",
+    "https://myanimelist.net/anime/29347",
+    "https://simkl.com/anime/1572807"
+   ],
+   "title": "20-dai no Heya-hen",
+   "type": "SPECIAL",
+   "episodes": 1,
+   "status": "FINISHED",
+   "animeSeason": {
+    "season": "WINTER",
+    "year": 2015
+   },
+   "picture": "https://cdn.myanimelist.net/images/anime/3/81169.jpg",
+   "thumbnail": "https://cdn.myanimelist.net/images/anime/3/81169t.jpg",
+   "duration": {
+    "value": 15,
+    "unit": "SECONDS"
+   },
+   "score": {
+    "arithmeticGeometricMean": 5.031252841481533,
+    "arithmeticMean": 5.059335188620904,
+    "median": 5.16
+   },
+   "synonyms": [
+    "20-dai no Heya Hen",
+    "MyNavi Chintai: 20-dai no Heya Hen",
+    "Rooms for Twentysomethings"
+   ],
+   "studios": [],
+   "producers": [],
+   "relatedAnime": [],
+   "tags": [
+    "apartment life",
+    "commercials",
+    "indefinite"
+   ]
+  },
+  {
+   "sources": [
+    "https://anidb.net/anime/18181",
+    "https://anilist.co/anime/165159",
+    "https://anime-planet.com/anime/beyblade-x",
+    "https://animecountdown.com/2249414",
+    "https://anisearch.com/anime/18438",
+    "https://kitsu.app/anime/47546",
+    "https://livechart.me/anime/12038",
+    "https://myanimelist.net/anime/56566",
+    "https://simkl.com/anime/2249414"
+   ],
+   "title": "Beyblade X",
+   "type": "TV",
+   "episodes": 128,
+   "status": "ONGOING",
+   "animeSeason": {
+    "season": "FALL",
+    "year": 2023
+   },
+   "picture": "https://cdn.myanimelist.net/images/anime/1394/145458.jpg",
+   "thumbnail": "https://cdn.myanimelist.net/images/anime/1394/145458t.jpg",
+   "duration": {
+    "value": 1440,
+    "unit": "SECONDS"
+   },
+   "score": {
+    "arithmeticGeometricMean": 6.6357188958873365,
+    "arithmeticMean": 6.651719233147804,
+    "median": 6.8945454545454545
+   },
+   "synonyms": [
+    "BBX Project",
+    "BEYBLADE X"
+   ],
+   "studios": [
+    "olm, inc."
+   ],
+   "producers": [],
+   "relatedAnime": [],
+   "tags": [
+    "3d cg animation",
+    "action",
+    "adventure"
+   ]
+  }
+ ]
+}

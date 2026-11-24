@@ -19,7 +19,8 @@
     "test": "pnpm -r test",
     "test:live": "pnpm -r test:live",
     "lint": "biome check .",
-    "typecheck": "pnpm -r typecheck"
+    "typecheck": "pnpm -r typecheck",
+    "reconsumet": "node packages/core/src/cli/index.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.6.8"
