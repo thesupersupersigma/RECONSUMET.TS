@@ -55,6 +55,8 @@ export interface FetcherConfig {
   retry?: Partial<RetryOptions>
   /** Requests in flight across all hosts. Default 64. */
   maxConcurrency?: number
+  /** Requests in flight per host when no rule sets `concurrency`. Default 8 (the relay raises it). */
+  hostConcurrency?: number
   /**
    * Retry a fingerprint-blocked `plain` response through `impersonate`, and remember that host for `ttlMs`.
    * Off unless set.

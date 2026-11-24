@@ -7,7 +7,11 @@ import type { Fetcher } from '../fetch/index.ts'
 
 export const ANILIST_URL = 'https://graphql.anilist.co'
 /** For the fetcher config: AniList allows 30 requests/minute right now (normally 90). */
-export const ANILIST_HOST_RULE = { match: 'graphql.anilist.co', rateLimit: { requests: 1, perMs: 2_000 }, concurrency: 1 }
+export const ANILIST_HOST_RULE = {
+  match: 'graphql.anilist.co',
+  rateLimit: { requests: 1, perMs: 2_000 },
+  concurrency: 1,
+}
 
 export interface AniListTitle {
   romaji: string | null

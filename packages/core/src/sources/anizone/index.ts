@@ -96,7 +96,12 @@ export function parseEpisodePage(html: string): { src: string; subtitles: Subtit
 }
 
 const unescapeAttr = (s: string) =>
-  s.replace(/&quot;/g, '"').replace(/&#039;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')
+  s
+    .replace(/&quot;/g, '"')
+    .replace(/&#039;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
 
 export function createAniZone(fetcher: Fetcher): Source {
   const page = async (path: string) => {
@@ -139,7 +144,12 @@ export function createAniZone(fetcher: Fetcher): Source {
       const json = await res.body.json<{
         components: {
           snapshot: string
-          effects: { dispatches?: { name: string; params: { items: ApiEpisode[]; nextCursor: string | null; hasMore: boolean } }[] }
+          effects: {
+            dispatches?: {
+              name: string
+              params: { items: ApiEpisode[]; nextCursor: string | null; hasMore: boolean }
+            }[]
+          }
         }[]
       }>()
       const c = json.components[0]
@@ -189,7 +199,9 @@ export function createAniZone(fetcher: Fetcher): Source {
         }
         servers.push({
           name: players.length > 1 ? `AniZone ${i + 1}` : 'AniZone',
-          streams: [{ url: p.src, type: 'hls', quality: 'auto', headers: {}, audioLang: audio === 'dub' ? 'en' : 'ja' }],
+          streams: [
+            { url: p.src, type: 'hls', quality: 'auto', headers: {}, audioLang: audio === 'dub' ? 'en' : 'ja' },
+          ],
           subtitles: p.subtitles,
         })
       }

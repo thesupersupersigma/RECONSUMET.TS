@@ -71,7 +71,10 @@ function ref(titles: string[], format: string | undefined, year?: number | null,
 async function mediaRef(m: AniListMedia, deps: MatchDeps): Promise<Ref> {
   const entry = await deps.catalog.get({ anilistId: m.id })
   // season/part markers come from the main titles only; synonyms are noisy ("Jujutsu Kaisen" on the S2 entry)
-  const main = ref([m.title.romaji, m.title.english].filter((t): t is string => !!t), m.format ?? undefined)
+  const main = ref(
+    [m.title.romaji, m.title.english].filter((t): t is string => !!t),
+    m.format ?? undefined,
+  )
   const all = ref(
     [m.title.romaji, m.title.english, ...m.synonyms, ...(entry?.synonyms ?? [])].filter((t): t is string => !!t),
     m.format ?? undefined,
@@ -167,7 +170,9 @@ function verifyRun(t: Ref, pre: Linked[], seq: Linked[], c: Ref): Scored | null 
     if (c.episodes && !fit && k > 0 && c.episodes < sum) continue
     const { sim, exact } = titleSim(first.ref, c)
     const reasons = [
-      k ? `continues "${first.title}" (${exact ? 'exact title' : `title ${sim.toFixed(2)}`})` : `title ${sim.toFixed(2)}`,
+      k
+        ? `continues "${first.title}" (${exact ? 'exact title' : `title ${sim.toFixed(2)}`})`
+        : `title ${sim.toFixed(2)}`,
       `offset ${acc}`,
     ]
     if (fit) reasons.push(`episodes add up (${fit})`)

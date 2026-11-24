@@ -39,7 +39,12 @@ describe('titles', () => {
     expect(stripStructure('Shingeki no Kyojin OVA')).toBe('Shingeki no Kyojin')
     expect(stripStructure('Spy x Family (2022)')).toBe('Spy x Family')
     const m = { title: { romaji: 'Gintama.: Porori-hen', english: 'Gintama.: Slip Arc', native: null } } as AniListMedia
-    expect(queriesFor(m, ['Gintama. (2017)'])).toEqual(['Gintama.: Porori-hen', 'Gintama.', 'Gintama. (2017)', 'Gintama.: Slip Arc'])
+    expect(queriesFor(m, ['Gintama. (2017)'])).toEqual([
+      'Gintama.: Porori-hen',
+      'Gintama.',
+      'Gintama. (2017)',
+      'Gintama.: Slip Arc',
+    ])
   })
 })
 
@@ -53,12 +58,25 @@ describe('createMatcher', () => {
       id: 'fake',
       search: async () => {
         searches++
-        return [{ id: 'abc', title: 'Re:Zero kara Hajimeru Isekai Seikatsu (2021)', altTitles: [], type: 'TV', year: 2021, episodes: 12 }]
+        return [
+          {
+            id: 'abc',
+            title: 'Re:Zero kara Hajimeru Isekai Seikatsu (2021)',
+            altTitles: [],
+            type: 'TV',
+            year: 2021,
+            episodes: 12,
+          },
+        ]
       },
       episodeId: (s: string, n: number) => `${s}/${n}`,
     } as unknown as Source
     const m = await media()
-    const matcher = createMatcher({ media: async () => m, catalog: { get: async () => undefined }, store: fileMappingStore(dir) })
+    const matcher = createMatcher({
+      media: async () => m,
+      catalog: { get: async () => undefined },
+      store: fileMappingStore(dir),
+    })
 
     const first = await matcher.match(119661, source)
     expect(first).toMatchObject({ showId: 'abc', episodeOffset: 0 })
@@ -69,7 +87,10 @@ describe('createMatcher', () => {
     expect(searches).toBe(before)
     expect((await matcher.resolveEpisode(119661, 3, source)).episodeId).toBe('abc/3')
 
-    await writeFile(join(dir, 'overrides.json'), JSON.stringify({ 'fake:119661': { showId: 'xyz', episodeOffset: 13, note: 'test' } }))
+    await writeFile(
+      join(dir, 'overrides.json'),
+      JSON.stringify({ 'fake:119661': { showId: 'xyz', episodeOffset: 13, note: 'test' } }),
+    )
     const o = await matcher.match(119661, source)
     expect(o).toMatchObject({ showId: 'xyz', episodeOffset: 13, reasons: ['manual override: test'] })
     expect((await matcher.resolveEpisode(119661, 1, source)).episodeId).toBe('xyz/14')
@@ -81,10 +102,16 @@ describe('createMatcher', () => {
   it('says "no match" instead of guessing below the threshold', async () => {
     const source = {
       id: 'fake',
-      search: async () => [{ id: 'x', title: 'Totally Different Show', altTitles: [], type: 'TV', year: 2021, episodes: 12 }],
+      search: async () => [
+        { id: 'x', title: 'Totally Different Show', altTitles: [], type: 'TV', year: 2021, episodes: 12 },
+      ],
     }
     const m = await media()
-    const matcher = createMatcher({ media: async () => m, catalog: { get: async () => undefined }, store: fileMappingStore(await tempDir()) })
+    const matcher = createMatcher({
+      media: async () => m,
+      catalog: { get: async () => undefined },
+      store: fileMappingStore(await tempDir()),
+    })
     const r = await matcher.match(119661, source)
     expect(r.showId).toBeNull()
     expect(r.reasons[0]).toMatch(/scored .* < 0\.65/)

@@ -27,8 +27,7 @@ export interface MappingStore {
 export function fileMappingStore(dir: string): MappingStore {
   const mappingsFile = join(dir, 'mappings.json')
   const overridesFile = join(dir, 'overrides.json')
-  const mappings = async () =>
-    (await readJson<Record<string, { at: number; result: MatchResult }>>(mappingsFile)) ?? {}
+  const mappings = async () => (await readJson<Record<string, { at: number; result: MatchResult }>>(mappingsFile)) ?? {}
   return {
     override: async (s, a) => (await readJson<Record<string, Override>>(overridesFile))?.[`${s}:${a}`],
     get: async (s, a) => (await mappings())[`${s}:${a}`],
@@ -69,7 +68,9 @@ export function createMatcher(deps: MatchDeps & { store: MappingStore }) {
     const m = await match(anilistId, source)
     if (!m.showId) throw new Error(`${source.id}: no match for AniList ${anilistId} (${m.reasons.join('; ')})`)
     if (m.episodeRange && episode > m.episodeRange[1] - m.episodeRange[0] + 1) {
-      throw new Error(`${source.id}: AniList ${anilistId} has ${m.episodeRange[1] - m.episodeRange[0] + 1} episodes here`)
+      throw new Error(
+        `${source.id}: AniList ${anilistId} has ${m.episodeRange[1] - m.episodeRange[0] + 1} episodes here`,
+      )
     }
     const sourceEpisode = episode + m.episodeOffset
     return { match: m, sourceEpisode, episodeId: source.episodeId(m.showId, sourceEpisode) }

@@ -18,7 +18,11 @@ it('golden set matches on the live sites', { timeout: 30 * 60_000 }, async () =>
   const { fetcher, sources } = createSources()
   const anilist = createAniList({ fetcher, dir: DATA })
   const catalog = new FileCatalogStore(DATA)
-  const rec = { media: {} as Record<number, unknown>, catalog: {} as Record<number, CatalogEntry | null>, search: {} as Record<string, SearchResult[]> }
+  const rec = {
+    media: {} as Record<number, unknown>,
+    catalog: {} as Record<number, CatalogEntry | null>,
+    search: {} as Record<string, SearchResult[]>,
+  }
   const deps = {
     media: async (id: number) => {
       const m = await anilist.media(id)
@@ -32,7 +36,9 @@ it('golden set matches on the live sites', { timeout: 30 * 60_000 }, async () =>
         status: m.status,
         seasonYear: m.seasonYear,
         startDate: m.startDate,
-        relations: { edges: m.relations?.edges.filter((e) => e.relationType === 'PREQUEL' || e.relationType === 'SEQUEL') },
+        relations: {
+          edges: m.relations?.edges.filter((e) => e.relationType === 'PREQUEL' || e.relationType === 'SEQUEL'),
+        },
       }
       return m
     },

@@ -57,7 +57,9 @@ describe('FileCatalogStore', () => {
     expect((await store.search('FRIEREN'))[0]?.anilistId).toBe(1)
 
     // AniList sync data merges into the offline entry found by MAL ID
-    await store.upsert([entry({ anilistId: 1, malId: 10, title: 'Sousou no Frieren', synonyms: ['Frieren'], episodes: 28 })])
+    await store.upsert([
+      entry({ anilistId: 1, malId: 10, title: 'Sousou no Frieren', synonyms: ['Frieren'], episodes: 28 }),
+    ])
     const merged = await store.get({ anilistId: 1 })
     expect(merged?.episodes).toBe(28)
     expect(merged?.synonyms).toEqual(['Frieren: Beyond Journey’s End', 'Frieren'])

@@ -72,7 +72,8 @@ export function parseEmbed(html: string): FlixEmbed {
   if (!seed || !wasm) throw new Error('flixcloud: embed has no obfuscation_seed / w_payload (page changed?)')
   const names = deriveFieldNames(seed)
   const values = Object.fromEntries(Object.entries(names).map(([k, n]) => [k, field(html, n)]))
-  for (const [k, v] of Object.entries(values)) if (!v) throw new Error(`flixcloud: field ${k} not found (scheme changed?)`)
+  for (const [k, v] of Object.entries(values))
+    if (!v) throw new Error(`flixcloud: field ${k} not found (scheme changed?)`)
 
   const subtitles: Subtitle[] = []
   for (const m of html.matchAll(/\{url:"([^"]+)",language:"([^"]*)",format:"(\w+)",default:(true|false)\}/g)) {
@@ -92,9 +93,11 @@ export function parseEmbed(html: string): FlixEmbed {
 }
 
 // The tsconfig has no DOM lib, so declare the bit of the global WebAssembly API we use.
-const wasmApi = (globalThis as unknown as {
-  WebAssembly: { instantiate(bytes: Uint8Array, imports: object): Promise<{ instance: { exports: unknown } }> }
-}).WebAssembly
+const wasmApi = (
+  globalThis as unknown as {
+    WebAssembly: { instantiate(bytes: Uint8Array, imports: object): Promise<{ instance: { exports: unknown } }> }
+  }
+).WebAssembly
 
 /** Run the page's WASM: three 32-byte fragments → E, plus the playlist XOR key from _c(). */
 export async function runWasm(embed: FlixEmbed, keyFrag3: string): Promise<{ e: Buffer; playlistKey: Buffer }> {
@@ -140,7 +143,8 @@ export async function decryptStream(embed: FlixEmbed, token: Record<string, unkn
   const url = Buffer.concat([d.update(Buffer.from(cipher, 'base64')), d.final()])
     .toString('utf8')
     .trim()
-  if (!/^https:\/\/[^\s/]+\/\S+\.m3u8(\?\S*)?$/.test(url)) throw new Error('flixcloud: decrypted value is not a playlist URL')
+  if (!/^https:\/\/[^\s/]+\/\S+\.m3u8(\?\S*)?$/.test(url))
+    throw new Error('flixcloud: decrypted value is not a playlist URL')
   return { url, playlistKey: playlistKey.toString('base64') }
 }
 

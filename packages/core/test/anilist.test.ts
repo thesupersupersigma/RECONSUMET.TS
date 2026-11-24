@@ -17,7 +17,10 @@ describe('AniList client', () => {
 
     const m = await al.media(119661)
     expect(m?.title.romaji).toBe('Re:Zero kara Hajimeru Isekai Seikatsu 2nd Season Part 2')
-    expect(m?.relations?.edges.find((e) => e.relationType === 'PREQUEL')?.node).toMatchObject({ id: 108632, episodes: 13 })
+    expect(m?.relations?.edges.find((e) => e.relationType === 'PREQUEL')?.node).toMatchObject({
+      id: 108632,
+      episodes: 13,
+    })
     expect(calls[0]?.options.method).toBe('POST')
     expect(calls[0]?.options.retry).toMatchObject({ methods: ['POST'] })
 
@@ -79,7 +82,14 @@ describe('helpers', () => {
 
   it('toCatalogEntry maps AniList vocabulary onto the catalog one', async () => {
     const e = toCatalogEntry(JSON.parse(await media()).data.Media)
-    expect(e).toMatchObject({ anilistId: 119661, malId: 42203, type: 'TV', status: 'FINISHED', episodes: 12, year: 2021 })
+    expect(e).toMatchObject({
+      anilistId: 119661,
+      malId: 42203,
+      type: 'TV',
+      status: 'FINISHED',
+      episodes: 12,
+      year: 2021,
+    })
     expect(e.synonyms[0]).toBe('Re:ZERO -Starting Life in Another World- Season 2 Part 2')
   })
 })

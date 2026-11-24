@@ -27,7 +27,6 @@ export interface Fetcher {
 /** Classes that a browser fingerprint can plausibly get past: escalation from plain to impersonate. */
 const FINGERPRINT_BLOCKED = new Set<ResponseClass>(['forbidden', 'cf-challenge', 'cf-block', 'ddos-guard'])
 const REDIRECT = new Set([301, 302, 303, 307, 308])
-const PER_HOST_CONCURRENCY = 8 // when no rule sets one
 
 interface Attempt {
   response: FetchResponse
@@ -66,7 +65,7 @@ export function createFetcher(config: FetcherConfig = {}): Fetcher {
   async function acquire(host: string, rule: HostRule | undefined, signal: AbortSignal): Promise<Release> {
     let gate = gates.get(host)
     if (!gate) {
-      gate = new HostGate(rule?.concurrency ?? PER_HOST_CONCURRENCY, rule?.rateLimit)
+      gate = new HostGate(rule?.concurrency ?? config.hostConcurrency ?? 8, rule?.rateLimit)
       gates.set(host, gate)
     }
     const hostRelease = await gate.acquire(signal) // host first, so a rate-limited host holds no global slot

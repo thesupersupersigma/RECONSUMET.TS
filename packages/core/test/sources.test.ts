@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { decodePlaylist, decryptStream, deriveFieldNames, parseEmbed } from '../src/extractors/flixcloud.ts'
-import { createAniZone, parseEpisodePage, parseSearch as parseAzSearch } from '../src/sources/anizone/index.ts'
+import { createAniZone, parseSearch as parseAzSearch, parseEpisodePage } from '../src/sources/anizone/index.ts'
 import { anilistIdFromWatch, createReAnime, parseSearch as parseRaSearch } from '../src/sources/reanime/index.ts'
 import { fakeFetcher, fixture } from './helpers.ts'
 
@@ -58,7 +58,12 @@ describe('FlixCloud extractor', () => {
 describe('Re:Anime', () => {
   it('search results carry the AniList ID; the show id embeds it', async () => {
     const r = parseRaSearch(JSON.parse(await fx.raSearch()))
-    expect(r[0]).toMatchObject({ id: '154587/frieren-beyond-journey-s-end-yw2a3j', anilistId: 154587, type: 'TV', year: 2023 })
+    expect(r[0]).toMatchObject({
+      id: '154587/frieren-beyond-journey-s-end-yw2a3j',
+      anilistId: 154587,
+      type: 'TV',
+      year: 2023,
+    })
     expect(r[0]?.altTitles).toContain('Frieren: Beyond Journey’s End')
   })
 

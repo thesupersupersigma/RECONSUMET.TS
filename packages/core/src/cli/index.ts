@@ -75,7 +75,9 @@ async function main() {
       const hits = await source(sub).search(rest.join(' '))
       if (values.json) return out(hits)
       for (const h of hits) {
-        console.log(`${h.id}\t${h.type ?? '?'}\t${h.year ?? '?'}\t${h.episodes ?? '?'}\t${h.anilistId ?? '-'}\t${h.title}`)
+        console.log(
+          `${h.id}\t${h.type ?? '?'}\t${h.year ?? '?'}\t${h.episodes ?? '?'}\t${h.anilistId ?? '-'}\t${h.title}`,
+        )
       }
       return
     }
@@ -83,7 +85,9 @@ async function main() {
       const rows = await Promise.all([...sources.values()].map(async (s) => ({ source: s.id, ...(await s.health()) })))
       if (values.json) return out(rows)
       for (const r of rows) {
-        console.log(`${r.ok ? 'ok  ' : 'FAIL'}\t${r.source}\t${r.status ?? '-'}\t${r.class}\t${r.ms}ms${r.error ? `\t${r.error}` : ''}`)
+        console.log(
+          `${r.ok ? 'ok  ' : 'FAIL'}\t${r.source}\t${r.status ?? '-'}\t${r.class}\t${r.ms}ms${r.error ? `\t${r.error}` : ''}`,
+        )
       }
       if (rows.some((r) => !r.ok)) process.exitCode = 1
       return
@@ -115,16 +119,24 @@ async function main() {
           const streams = await s.getStreams(r.episodeId, { audio })
           const result = { source: s.id, anilistId: id, episode, ...r, audio, ...streams }
           if (values.json) return out(result)
-          console.log(`${s.id}: ${r.match.title ?? r.match.showId} — source episode ${r.sourceEpisode} (${r.episodeId}), ${audio}`)
+          console.log(
+            `${s.id}: ${r.match.title ?? r.match.showId} — source episode ${r.sourceEpisode} (${r.episodeId}), ${audio}`,
+          )
           for (const sv of streams.servers) {
             console.log(`  ${sv.name}${sv.intro ? `  intro ${sv.intro.start}-${sv.intro.end}s` : ''}`)
             for (const st of sv.streams) {
-              const flags = [st.audioLang && `audio=${st.audioLang}`, st.playlistKey && 'xor-playlists', st.ipLocked && 'ip-locked']
+              const flags = [
+                st.audioLang && `audio=${st.audioLang}`,
+                st.playlistKey && 'xor-playlists',
+                st.ipLocked && 'ip-locked',
+              ]
               console.log(`    ${st.type} ${st.quality} ${st.url}  ${flags.filter(Boolean).join(' ')}`)
               if (Object.keys(st.headers).length) console.log(`      headers ${JSON.stringify(st.headers)}`)
             }
             const subs = sv.subtitles
-            console.log(`    subtitles: ${subs.length} (${[...new Set(subs.map((x) => `${x.lang}/${x.format}`))].join(', ')})`)
+            console.log(
+              `    subtitles: ${subs.length} (${[...new Set(subs.map((x) => `${x.lang}/${x.format}`))].join(', ')})`,
+            )
             const def = subs.find((x) => x.default) ?? subs[0]
             if (def) console.log(`      default: ${def.label} ${def.url}`)
           }
