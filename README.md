@@ -5,7 +5,7 @@
 <p align="center">
   <a href="https://discord.gg/trvtVNWzaf"><img src="https://img.shields.io/badge/discord-join-5865F2" alt="Discord"></a>
   <img src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue" alt="License: GPL-3.0-or-later">
-  <img src="https://img.shields.io/badge/version-0.3.0-orange" alt="Version 0.3.0">
+  <img src="https://img.shields.io/badge/version-0.4.0-orange" alt="Version 0.4.0">
 </p>
 
 # RECONSUMΣT.TS — v2 (rewrite in progress)
@@ -13,17 +13,30 @@
 A self-hostable anime aggregator: a TypeScript scraping library plus an HTTP API with a built-in HLS + subtitle proxy.
 It turns an AniList ID and an episode number into playable streams from whichever sources currently work.
 
-**Status: v0.3.0 — first sources.** v2 is being rewritten from scratch. `packages/core` now turns an AniList ID +
-episode number into playable streams (HLS, required headers, soft subtitles) from **Re:Anime** and **AniZone**, with
-season / split-cour mapping ([docs/sources.md](docs/sources.md)), on top of an anime catalog + AniList client
-([docs/catalog.md](docs/catalog.md)) and the fetch layer ([docs/fetch.md](docs/fetch.md),
-[docs/tls-bakeoff.md](docs/tls-bakeoff.md)). Library + CLI only; the HTTP API and the video proxy come in 0.4.
+**Status: v0.4.0 — API + relay.** v2 is being rewritten from scratch. RECONSUMΣT.TS is now a service: an HTTP API
+(Hono, OpenAPI at `/docs`, API keys, rate limits, scheduled jobs, Postgres) that turns an AniList ID + episode number into
+streams from **Re:Anime** and **AniZone**, and a separate **video relay** that serves every playlist, segment and
+subtitle behind sealed, short-lived links ([docs/api.md](docs/api.md), [docs/relay.md](docs/relay.md),
+[docs/deploy.md](docs/deploy.md)). Underneath: the sources and season mapping ([docs/sources.md](docs/sources.md)), the
+anime catalog + AniList client ([docs/catalog.md](docs/catalog.md)) and the fetch layer ([docs/fetch.md](docs/fetch.md),
+[docs/tls-bakeoff.md](docs/tls-bakeoff.md)).
+
+| Package | What |
+|---|---|
+| `@reconsumet/core` | library: fetch layer, catalog, AniList client, sources, matching, relay tokens |
+| `@reconsumet/db` | Postgres schema, migrations and stores (Drizzle) |
+| `@reconsumet/api` | the HTTP API + jobs (Docker target `api`) |
+| `@reconsumet/relay` | the video/subtitle relay (Docker target `relay`) |
+| `@reconsumet/client` | typed API client for the site |
+
 The previous version (v1, June–August 2026) is kept on the [`old`](../../tree/old) branch.
 
 ## Development
 
-Node 26 and pnpm. `pnpm install`, then `pnpm build`, `pnpm test` (offline), `pnpm test:live` (real sites, AniList,
-tls.peet.ws), `pnpm lint`, `pnpm typecheck`.
+Node 26 and pnpm. `pnpm install`, then `pnpm build` (the packages import each other's built `dist/`, so build before
+testing), `pnpm test` (offline; Postgres tests run on PGlite, no Docker needed), `pnpm test:live` (real sites, AniList,
+tls.peet.ws, and API → relay end to end), `pnpm lint`, `pnpm typecheck`. The whole stack locally: `cp .env.example .env`,
+fill in the secrets, `docker compose up --build` ([docs/deploy.md](docs/deploy.md)).
 
 The dev CLI keeps its data in `./data` (or `RECONSUMET_DATA_DIR`):
 
