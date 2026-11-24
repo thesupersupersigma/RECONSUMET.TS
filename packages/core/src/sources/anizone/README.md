@@ -29,7 +29,7 @@ Our ids: show = slug (`y25twzsk`), episode = `<slug>/<n>`.
 which is what makes matching reliable. Offsets are needed only where AniDB merges cours AniList splits (e.g.
 "Gintama. (2017)" = Porori-hen 13 + Shirogane no Tamashii-hen part 1 12).
 
-## Video (`*.vid-cdn.xyz`, e.g. `seiryuu.vid-cdn.xyz`)
+## Video (`*.vid-cdn.xyz` and `*.xin-cdn.xyz`, e.g. `seiryuu.vid-cdn.xyz`, `suzaku.xin-cdn.xyz`)
 
 - Master `https://<name>.vid-cdn.xyz/<uuid>/master.m3u8`: 360p/720p/1080p + **multi-audio** groups (Japanese, often
   English, German, Spanish, French, Italian, Portuguese…). So dub = select the `en` audio track; we check the master
@@ -37,7 +37,8 @@ which is what makes matching reliable. Offsets are needed only where AniDB merge
 - Variant playlists: `#EXT-X-KEY:METHOD=AES-128,URI="../../keys/<id>.key"`, segments `video/720/00000.ts` (relative).
 - Subtitles: **soft**, `.ass` and `.srt` on the same CDN (`/subtitles/<n>_<lang>.ass`), many languages (Frieren S2
   ep 1: 20+ tracks incl. forced and CC). everythingmoe notes older releases are hard-subbed (one video, no tracks).
-- `xin-cdn.xyz` (v1) wasn't seen; `vid-cdn.xyz` no longer resets plain TLS handshakes.
+- Both CDNs from v1 are still in use (older shows, e.g. Gintama, sit on `xin-cdn.xyz`), and neither gates any more:
+  `vid-cdn.xyz` no longer resets plain TLS handshakes and `xin-cdn.xyz` no longer 403s everyone.
 
 ## Fetch tier per request (measured 2026-11-24, Windows PC, home connection)
 
@@ -53,6 +54,7 @@ Measured with `node tools/playback-check/probe.ts <url> --referer https://anizon
 | master + variant playlists | `seiryuu.vid-cdn.xyz` | 200 | 200 | 200 | `https://anizone.to` (fixed) |
 | segments (.ts) | same | 200 | 200 | 200 | `https://anizone.to` |
 | subtitles (.ass) | same | 200 | 200 | 200 | `https://anizone.to` |
+| master, segment, subtitle | `suzaku.xin-cdn.xyz` | 200 | 200 | 200 | `https://anizone.to` |
 
 → No Referer, no fingerprint, but **CORS only allows anizone.to**, so hls.js on our origin can't read playlists or
 segments, and the subtitle renderer can't read the `.ass` files. A relay has to re-serve them with our CORS header

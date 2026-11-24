@@ -1,7 +1,7 @@
 {
   "name": "@reconsumet/core",
   "version": "0.2.0",
-  "description": "RECONSUMΣT.TS core: the fetch layer every source, the API and the proxy use",
+  "description": "RECONSUMΣT.TS core: fetch layer, anime catalog, AniList client, sources and AniList→source matching",
   "license": "GPL-3.0-or-later",
   "author": "thesupersupersigma",
   "type": "module",
@@ -32,5 +32,8 @@
     "@types/node": "^26.6.6",
     "typescript": "^7.0.2",
     "vitest": "^5.1.1"
+  },
+  "bin": {
+    "reconsumet": "./dist/cli/index.js"
   }
 }
