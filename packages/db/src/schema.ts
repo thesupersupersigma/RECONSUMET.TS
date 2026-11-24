@@ -32,6 +32,7 @@ export const catalog = pgTable(
     year: integer('year'),
     picture: text('picture'),
     duration: integer('duration'),
+    isAdult: boolean('is_adult'),
     /** normalizeTitle(title + synonyms) joined with ' | ', for trigram search. */
     search: text('search').notNull(),
   },

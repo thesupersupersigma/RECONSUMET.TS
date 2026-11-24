@@ -22,7 +22,9 @@ describe('normalizeManami', () => {
       season: 'SUMMER',
       year: 2023,
       duration: 1380,
+      isAdult: false,
     })
+    expect(normalizeManami({ ...data[0], tags: ['hentai'] }).isAdult).toBe(true)
     expect(jjk.synonyms).toContain('Jujutsu Kaisen (2023)')
     expect(noAnilist.anilistId).toBeUndefined()
     expect(noAnilist.anidbId).toBeTypeOf('number')

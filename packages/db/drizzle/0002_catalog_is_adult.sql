@@ -1,0 +1,1 @@
+ALTER TABLE "catalog" ADD COLUMN "is_adult" boolean;

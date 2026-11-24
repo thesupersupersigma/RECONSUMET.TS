@@ -15,6 +15,7 @@ interface ManamiEntry {
   picture?: string
   duration?: { value: number; unit: string }
   synonyms?: string[]
+  tags?: string[]
 }
 
 const ID_PATTERNS = {
@@ -35,6 +36,7 @@ export function normalizeManami(m: ManamiEntry): CatalogEntry {
     year: m.animeSeason?.year ?? null,
     picture: m.picture ?? null,
     duration: m.duration ? m.duration.value * (m.duration.unit === 'SECONDS' ? 1 : 60) : null,
+    ...(m.tags ? { isAdult: m.tags.includes('hentai') } : {}),
   }
   for (const src of m.sources) {
     for (const [k, re] of Object.entries(ID_PATTERNS)) {

@@ -12,6 +12,7 @@ function toEntry(row: Row): CatalogEntry {
   const { title, synonyms, type, episodes, status, season, year, picture, duration } = row
   const e: CatalogEntry = { title, synonyms, type, episodes, status, season, year, picture, duration }
   for (const k of ID_KEYS) if (row[k] != null) e[k] = row[k]
+  if (row.isAdult != null) e.isAdult = row.isAdult
   return e
 }
 
@@ -31,6 +32,7 @@ function toRow(e: CatalogEntry) {
     year: e.year,
     picture: e.picture,
     duration: e.duration,
+    isAdult: e.isAdult ?? null,
     search: names.join(' | '),
   }
 }

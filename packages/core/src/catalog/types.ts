@@ -18,6 +18,8 @@ export interface CatalogEntry {
   picture: string | null
   /** Seconds per episode. */
   duration: number | null
+  /** Adult (hentai) title: AniList's isAdult, or the offline database's "hentai" tag. Absent = unknown. */
+  isAdult?: boolean
 }
 
 export type CatalogRef = Pick<CatalogEntry, 'anilistId' | 'malId' | 'kitsuId' | 'anidbId'>

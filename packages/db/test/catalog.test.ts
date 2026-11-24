@@ -7,13 +7,13 @@ describe('PgCatalogStore', () => {
     const store = new PgCatalogStore(await freshDb())
     await store.upsert([
       entry({ anilistId: 1, malId: 10, title: 'Sousou no Frieren', synonyms: ['Frieren: Beyond Journey’s End'] }),
-      entry({ anidbId: 99, title: 'Some OVA', type: 'OVA' }),
+      entry({ anidbId: 99, title: 'Some OVA', type: 'OVA', isAdult: true }),
       entry({ anilistId: 2, title: 'Airing Show', status: 'ONGOING' }),
     ])
     expect(await store.get({ malId: 10 })).toEqual(
       entry({ anilistId: 1, malId: 10, title: 'Sousou no Frieren', synonyms: ['Frieren: Beyond Journey’s End'] }),
     )
-    expect((await store.get({ anidbId: 99 }))?.type).toBe('OVA')
+    expect(await store.get({ anidbId: 99 })).toMatchObject({ type: 'OVA', isAdult: true })
     expect((await store.get({ anilistId: 404, malId: 10 }))?.anilistId).toBe(1) // falls through to the next ID
     expect(await store.get({ kitsuId: 5 })).toBeUndefined()
     expect((await store.search('frieren beyond journeys end'))[0]?.anilistId).toBe(1)
