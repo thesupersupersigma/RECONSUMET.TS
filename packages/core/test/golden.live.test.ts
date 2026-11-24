@@ -16,7 +16,7 @@ const DATA = fileURLToPath(new URL('../../../data', import.meta.url))
 
 it('golden set matches on the live sites', { timeout: 30 * 60_000 }, async () => {
   const { fetcher, sources } = createSources()
-  const anilist = createAniList({ fetcher, dir: DATA })
+  const anilist = createAniList({ fetcher, dir: DATA, perMinute: 1000 }) // the fetcher's host rule paces it
   const catalog = new FileCatalogStore(DATA)
   const rec = {
     media: {} as Record<number, unknown>,

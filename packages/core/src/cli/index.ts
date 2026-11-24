@@ -33,7 +33,8 @@ Options:
 
 Environment:
   RECONSUMET_DATA_DIR            data dir (default ./data)
-  RECONSUMET_ANILIST_DAILY_CAP   AniList requests per UTC day (default 300)`
+  RECONSUMET_ANILIST_DAILY_CAP   AniList lookups per UTC day (default 3000)
+  RECONSUMET_ANILIST_PER_MIN     AniList lookups per minute (default 20)`
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,

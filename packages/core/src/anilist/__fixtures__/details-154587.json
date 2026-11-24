@@ -1,0 +1,1328 @@
+{
+ "data": {
+  "Media": {
+   "id": 154587,
+   "idMal": 52991,
+   "title": {
+    "romaji": "Sousou no Frieren",
+    "english": "Frieren: Beyond Journey’s End",
+    "native": "葬送のフリーレン"
+   },
+   "synonyms": [
+    "Frieren at the Funeral",
+    "장송의 프리렌",
+    "Frieren - Oltre la Fine del Viaggio",
+    "คำอธิษฐานในวันที่จากลา Frieren",
+    "Frieren e a Jornada para o Além",
+    "Frieren – Nach dem Ende der Reise",
+    "葬送的芙莉蓮",
+    "Frieren: Más allá del final del viaje",
+    "Frieren en el funeral",
+    "Sōsō no Furīren",
+    "Frieren. U kresu drogi",
+    "Frieren - Pháp sư tiễn táng",
+    "Фрирен, провожающая в последний путь",
+    "فريرن: ما وراء نهاية الرحلة",
+    "Frieren: Tras finalizar el viaje"
+   ],
+   "format": "TV",
+   "episodes": 28,
+   "status": "FINISHED",
+   "season": "FALL",
+   "seasonYear": 2023,
+   "startDate": {
+    "year": 2023,
+    "month": 9,
+    "day": 29
+   },
+   "endDate": {
+    "year": 2024,
+    "month": 3,
+    "day": 22
+   },
+   "duration": 24,
+   "nextAiringEpisode": null,
+   "coverImage": {
+    "extraLarge": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx154587-qQTzQnEJJ3oB.jpg",
+    "large": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx154587-qQTzQnEJJ3oB.jpg",
+    "medium": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/small/bx154587-qQTzQnEJJ3oB.jpg",
+    "color": "#bbf1a1"
+   },
+   "bannerImage": "https://s4.anilist.co/file/anilistcdn/media/anime/banner/154587-ivXNJ23SM1xB.jpg",
+   "description": "The adventure is over but life goes on for an elf mage just beginning to learn what living is all about. Elf mage Frieren and her courageous fellow adventurers have defeated the Demon King and brought peace to the land. But Frieren will long outlive the rest of her former party. How will she come to understand what life means to the people around her? Decades after their victory, the funeral of one her friends confronts Frieren with her own near immortality. Frieren sets out to fulfill the last wishes of her comrades and finds herself beginning a new adventure…\n<br><br>\n(Source: Crunchyroll)",
+   "genres": [
+    "Adventure",
+    "Drama",
+    "Fantasy"
+   ],
+   "tags": [
+    {
+     "name": "Travel",
+     "rank": 96,
+     "isSpoiler": false,
+     "isAdult": false
+    },
+    {
+     "name": "Magic",
+     "rank": 95,
+     "isSpoiler": false,
+     "isAdult": false
+    },
+    {
+     "name": "Elf",
+     "rank": 91,
+     "isSpoiler": false,
+     "isAdult": false
+    },
+    {
+     "name": "Female Protagonist",
+     "rank": 86,
+     "isSpoiler": false,
+     "isAdult": false
+    },
+    {
+     "name": "Philosophy",
+     "rank": 83,
+     "isSpoiler": false,
+     "isAdult": false
+    },
+    {
+     "name": "Medieval",
+     "rank": 83,
+     "isSpoiler": false,
+     "isAdult": false
+    },
+    {
+     "name": "Time Skip",
+     "rank": 82,
+     "isSpoiler": true,
+     "isAdult": false
+    },
+    {
+     "name": "Found Family",
+     "rank": 80,
+     "isSpoiler": false,
+     "isAdult": false
+    },
+    {
+     "name": "Kuudere",
+     "rank": 75,
+     "isSpoiler": false,
+     "isAdult": false
+    },
+    {
+     "name": "Demons",
+     "rank": 71,
+     "isSpoiler": false,
+     "isAdult": false
+    },
+    {
+     "name": "Shounen",
+     "rank": 71,
+     "isSpoiler": false,
+     "isAdult": false
+    },
+    {
+     "name": "Foreign",
+     "rank": 69,
+     "isSpoiler": false,
+     "isAdult": false
+    },
+    {
+     "name": "Iyashikei",
+     "rank": 63,
+     "isSpoiler": false,
+     "isAdult": false
+    },
+    {
+     "name": "Adoption",
+     "rank": 61,
+     "isSpoiler": false,
+     "isAdult": false
+    },
+    {
+     "name": "Rural",
+     "rank": 60,
+     "isSpoiler": false,
+     "isAdult": false
+    },
+    {
+     "name": "Heterosexual",
+     "rank": 58,
+     "isSpoiler": false,
+     "isAdult": false
+    },
+    {
+     "name": "Aromantic",
+     "rank": 58,
+     "isSpoiler": false,
+     "isAdult": false
+    },
+    {
+     "name": "Dungeon",
+     "rank": 56,
+     "isSpoiler": false,
+     "isAdult": false
+    },
+    {
+     "name": "Asexual",
+     "rank": 54,
+     "isSpoiler": false,
+     "isAdult": false
+    },
+    {
+     "name": "Episodic",
+     "rank": 54,
+     "isSpoiler": false,
+     "isAdult": false
+    },
+    {
+     "name": "Religion",
+     "rank": 47,
+     "isSpoiler": false,
+     "isAdult": false
+    },
+    {
+     "name": "Rotoscoping",
+     "rank": 47,
+     "isSpoiler": false,
+     "isAdult": false
+    },
+    {
+     "name": "Snowscape",
+     "rank": 43,
+     "isSpoiler": false,
+     "isAdult": false
+    },
+    {
+     "name": "Spearplay",
+     "rank": 42,
+     "isSpoiler": false,
+     "isAdult": false
+    },
+    {
+     "name": "Dragons",
+     "rank": 38,
+     "isSpoiler": false,
+     "isAdult": false
+    },
+    {
+     "name": "CGI",
+     "rank": 37,
+     "isSpoiler": false,
+     "isAdult": false
+    },
+    {
+     "name": "Food",
+     "rank": 36,
+     "isSpoiler": false,
+     "isAdult": false
+    },
+    {
+     "name": "Horticulture",
+     "rank": 36,
+     "isSpoiler": false,
+     "isAdult": false
+    }
+   ],
+   "averageScore": 90,
+   "meanScore": 90,
+   "popularity": 501920,
+   "favourites": 57272,
+   "source": "MANGA",
+   "countryOfOrigin": "JP",
+   "isAdult": false,
+   "hashtag": "#フリーレン #frieren",
+   "siteUrl": "https://anilist.co/anime/154587",
+   "trailer": {
+    "site": "youtube",
+    "id": "tR8YH0G67Rk",
+    "thumbnail": "https://i.ytimg.com/vi/tR8YH0G67Rk/hqdefault.jpg"
+   },
+   "studios": {
+    "edges": [
+     {
+      "isMain": false,
+      "node": {
+       "id": 245,
+       "name": "Toho",
+       "isAnimationStudio": false
+      }
+     },
+     {
+      "isMain": true,
+      "node": {
+       "id": 11,
+       "name": "MADHOUSE",
+       "isAnimationStudio": true
+      }
+     },
+     {
+      "isMain": false,
+      "node": {
+       "id": 6161,
+       "name": "Shogakukan",
+       "isAnimationStudio": false
+      }
+     },
+     {
+      "isMain": false,
+      "node": {
+       "id": 6620,
+       "name": "Nippon Television Network",
+       "isAnimationStudio": false
+      }
+     },
+     {
+      "isMain": false,
+      "node": {
+       "id": 62,
+       "name": "Shogakukan-Shueisha Productions",
+       "isAnimationStudio": false
+      }
+     },
+     {
+      "isMain": false,
+      "node": {
+       "id": 17,
+       "name": "Aniplex",
+       "isAnimationStudio": false
+      }
+     },
+     {
+      "isMain": false,
+      "node": {
+       "id": 53,
+       "name": "Dentsu",
+       "isAnimationStudio": false
+      }
+     }
+    ]
+   },
+   "externalLinks": [
+    {
+     "site": "Official Site",
+     "url": "https://frieren-anime.jp/",
+     "type": "INFO",
+     "language": "Japanese"
+    },
+    {
+     "site": "Twitter",
+     "url": "https://twitter.com/anime_frieren",
+     "type": "SOCIAL",
+     "language": "Japanese"
+    },
+    {
+     "site": "Crunchyroll",
+     "url": "https://www.crunchyroll.com/series/GG5H5XQX4/frieren-beyond-journeys-end",
+     "type": "STREAMING",
+     "language": null
+    },
+    {
+     "site": "Bilibili TV",
+     "url": "https://www.bilibili.tv/en/media/2090295",
+     "type": "STREAMING",
+     "language": null
+    },
+    {
+     "site": "YouTube",
+     "url": "https://www.youtube.com/playlist?list=PLwLSw1_eDZl10YPPR7qDsVf10wZfYnIMK",
+     "type": "STREAMING",
+     "language": null
+    },
+    {
+     "site": "TikTok",
+     "url": "https://www.tiktok.com/@anime_frieren",
+     "type": "SOCIAL",
+     "language": "Japanese"
+    },
+    {
+     "site": "Netflix",
+     "url": "https://www.netflix.com/title/81726714",
+     "type": "STREAMING",
+     "language": null
+    },
+    {
+     "site": "Hulu",
+     "url": "https://www.hulu.com/series/frieren-beyond-journeys-end-1d4725f8-06d1-43fb-a077-72143ac5502f",
+     "type": "STREAMING",
+     "language": null
+    },
+    {
+     "site": "Amazon Prime Video",
+     "url": "https://www.primevideo.com/detail/0FCJEHY4FXTDVCLZ5NR9A0N42N",
+     "type": "STREAMING",
+     "language": null
+    }
+   ],
+   "streamingEpisodes": [
+    {
+     "title": "Episode 1 - The Journey's End",
+     "thumbnail": "https://img1.ak.crunchyroll.com/i/spire1-tmb/0a540e01e5d00a998a241d1ea23181ad1695991424_full.jpg",
+     "url": "http://www.crunchyroll.com/watch/G2XU04E88/the-journeys-end",
+     "site": "Crunchyroll"
+    },
+    {
+     "title": "Episode 2 - It Didn't Have to Be Magic...",
+     "thumbnail": "https://img1.ak.crunchyroll.com/i/spire1-tmb/747ed837208f39c176f3bf2b21e619cf1695997330_full.jpg",
+     "url": "http://www.crunchyroll.com/watch/G8WUNGZ48/it-didnt-have-to-be-magic",
+     "site": "Crunchyroll"
+    },
+    {
+     "title": "Episode 3 - Killing Magic",
+     "thumbnail": "https://img1.ak.crunchyroll.com/i/spire1-tmb/f5297f95ee0122d9fa2338bc02e2f0841695997426_full.jpg",
+     "url": "http://www.crunchyroll.com/watch/GZ7UV2Z0K/killing-magic",
+     "site": "Crunchyroll"
+    },
+    {
+     "title": "Episode 4 - The Land Where Souls Rest",
+     "thumbnail": "https://img1.ak.crunchyroll.com/i/spire2-tmb/be41aa39b17e6af8505008be17704fc21695997457_full.jpg",
+     "url": "http://www.crunchyroll.com/watch/GD9UVQ5P5/the-land-where-souls-rest",
+     "site": "Crunchyroll"
+    },
+    {
+     "title": "Episode 5 - Phantoms of the Dead",
+     "thumbnail": "https://img1.ak.crunchyroll.com/i/spire4-tmb/5511652dd902e2c68713a059d79524681696586792_full.jpg",
+     "url": "http://www.crunchyroll.com/watch/G14U49MDV/phantoms-of-the-dead",
+     "site": "Crunchyroll"
+    },
+    {
+     "title": "Episode 6 - The Hero of the Village",
+     "thumbnail": "https://img1.ak.crunchyroll.com/i/spire2-tmb/8f58dbe3742e24df5cfcb34e966343cb1697192129_full.jpg",
+     "url": "http://www.crunchyroll.com/watch/G0DUNDJ79/the-hero-of-the-village",
+     "site": "Crunchyroll"
+    },
+    {
+     "title": "Episode 7 - Like a Fairy Tale",
+     "thumbnail": "https://img1.ak.crunchyroll.com/i/spire4-tmb/7415f048b9950f447fe53daf052b83511697807940_full.jpg",
+     "url": "http://www.crunchyroll.com/watch/GEVUZXXN8/like-a-fairy-tale",
+     "site": "Crunchyroll"
+    },
+    {
+     "title": "Episode 8 - Frieren the Slayer",
+     "thumbnail": "https://img1.ak.crunchyroll.com/i/spire1-tmb/b4c1b2828197930c28e7222c8674f7db1698398711_full.jpg",
+     "url": "http://www.crunchyroll.com/watch/GK9U3MK1G/frieren-the-slayer",
+     "site": "Crunchyroll"
+    },
+    {
+     "title": "Episode 9 - Aura the Guillotine",
+     "thumbnail": "https://img1.ak.crunchyroll.com/i/spire3-tmb/011eed937d57541a48b41654aa7196f41699023505_full.jpg",
+     "url": "http://www.crunchyroll.com/watch/GMKUXQ1QV/aura-the-guillotine",
+     "site": "Crunchyroll"
+    },
+    {
+     "title": "Episode 10 - A Powerful Mage",
+     "thumbnail": "https://img1.ak.crunchyroll.com/i/spire2-tmb/71a64490900288c051509d5ead8078c81699629921_full.jpg",
+     "url": "http://www.crunchyroll.com/watch/GVWU07N79/a-powerful-mage",
+     "site": "Crunchyroll"
+    },
+    {
+     "title": "Episode 11 - Winter in the Northern Lands",
+     "thumbnail": "https://img1.ak.crunchyroll.com/i/spire3-tmb/1d362c34b136f3d7dae0f8e2483d292c1700200761_full.jpg",
+     "url": "http://www.crunchyroll.com/watch/G50UZVDZP/winter-in-the-northern-lands",
+     "site": "Crunchyroll"
+    },
+    {
+     "title": "Episode 12 - A Real Hero",
+     "thumbnail": "https://img1.ak.crunchyroll.com/i/spire1-tmb/a4fb43dd94ffef24c89c737cb582d9d71700837484_full.jpg",
+     "url": "http://www.crunchyroll.com/watch/G7PU414Z2/a-real-hero",
+     "site": "Crunchyroll"
+    },
+    {
+     "title": "Episode 13 - Aversion to One's Own Kind",
+     "thumbnail": "https://img1.ak.crunchyroll.com/i/spire4-tmb/daec8c87d3d141cb4db3862d6dbce8e61701407594_full.jpg",
+     "url": "http://www.crunchyroll.com/watch/GK9U3KWG4/aversion-to-ones-own-kind",
+     "site": "Crunchyroll"
+    },
+    {
+     "title": "Episode 14 - Privilege of the Young",
+     "thumbnail": "https://img1.ak.crunchyroll.com/i/spire2-tmb/571e40382b362b8e079a1c1105f9aa121702044026_full.jpg",
+     "url": "http://www.crunchyroll.com/watch/G31UX45VQ/privilege-of-the-young",
+     "site": "Crunchyroll"
+    },
+    {
+     "title": "Episode 15 - Smells Like Trouble",
+     "thumbnail": "https://img1.ak.crunchyroll.com/i/spire3-tmb/0632aa850feca384b1586dedbafc75771702649756_full.jpg",
+     "url": "http://www.crunchyroll.com/watch/GWDU8JN8Z/smells-like-trouble",
+     "site": "Crunchyroll"
+    },
+    {
+     "title": "Episode 16 - Long-Lived Friends",
+     "thumbnail": "https://img1.ak.crunchyroll.com/i/spire2-tmb/089ef00e4cd07c88f94f19cc748bcb991703259561_full.jpg",
+     "url": "http://www.crunchyroll.com/watch/GVWU07DK5/long-lived-friends",
+     "site": "Crunchyroll"
+    },
+    {
+     "title": "Episode 17 - Take Care",
+     "thumbnail": "https://img1.ak.crunchyroll.com/i/spire3-tmb/e18f2ee07942246cd068fad9d154adaa1704458527_full.jpg",
+     "url": "http://www.crunchyroll.com/watch/G50UZV29J/take-care",
+     "site": "Crunchyroll"
+    },
+    {
+     "title": "Episode 18 - First-Class Mage Exam",
+     "thumbnail": "https://img1.ak.crunchyroll.com/i/spire4-tmb/8b67d3369e6d5cff70354925f129e47a1705032276_full.jpg",
+     "url": "http://www.crunchyroll.com/watch/G7PU41VQV/first-class-mage-exam",
+     "site": "Crunchyroll"
+    },
+    {
+     "title": "Episode 19 - Well-Laid Plans",
+     "thumbnail": "https://img1.ak.crunchyroll.com/i/spire1-tmb/edc57dc72424d622047aa9ff632722d01705668067_full.jpg",
+     "url": "http://www.crunchyroll.com/watch/GD9UV3DKV/well-laid-plans",
+     "site": "Crunchyroll"
+    },
+    {
+     "title": "Episode 20 - Necessary Killing",
+     "thumbnail": "https://img1.ak.crunchyroll.com/i/spire1-tmb/5084aa3fa2b746c4d94ce982a02f53831706275610_full.jpg",
+     "url": "http://www.crunchyroll.com/watch/GMKUXP87V/necessary-killing",
+     "site": "Crunchyroll"
+    },
+    {
+     "title": "Episode 21 - The World of Magic",
+     "thumbnail": "https://img1.ak.crunchyroll.com/i/spire2-tmb/1bff419f590742822f733d968b2bfece1706866862_full.jpg",
+     "url": "http://www.crunchyroll.com/watch/GD9UV3JNQ/the-world-of-magic",
+     "site": "Crunchyroll"
+    },
+    {
+     "title": "Episode 22 - Future Enemies",
+     "thumbnail": "https://img1.ak.crunchyroll.com/i/spire1-tmb/9c5901edffefae3af8732ebad4a5a51b1707491556_full.jpg",
+     "url": "http://www.crunchyroll.com/watch/GK9U3KJWM/future-enemies",
+     "site": "Crunchyroll"
+    },
+    {
+     "title": "Episode 23 - Conquering the Labyrinth",
+     "thumbnail": "https://img1.ak.crunchyroll.com/i/spire4-tmb/f3560639fe0f53c64bf6e25cd84fb1e91708082146_full.jpg",
+     "url": "http://www.crunchyroll.com/watch/GVWU079EX/conquering-the-labyrinth",
+     "site": "Crunchyroll"
+    },
+    {
+     "title": "Episode 24 - Perfect Replicas",
+     "thumbnail": "https://img1.ak.crunchyroll.com/i/spire2-tmb/ddefe54ecd4b64728dd2aebaae6284601708700271_full.jpg",
+     "url": "http://www.crunchyroll.com/watch/GMKUXPGWJ/perfect-replicas",
+     "site": "Crunchyroll"
+    },
+    {
+     "title": "Episode 25 - A Fatal Vulnerability",
+     "thumbnail": "https://img1.ak.crunchyroll.com/i/spire3-tmb/56674020dfd38ca7445e9d1c340e81ea1709305367_full.jpg",
+     "url": "http://www.crunchyroll.com/watch/GJWU2002W/a-fatal-vulnerability",
+     "site": "Crunchyroll"
+    },
+    {
+     "title": "Episode 26 - The Height of Magic",
+     "thumbnail": "https://img1.ak.crunchyroll.com/i/spire4-tmb/8190c1e5388f2f83a19f9fd550d355801709908851_full.jpg",
+     "url": "http://www.crunchyroll.com/watch/GEVUZD79N/the-height-of-magic",
+     "site": "Crunchyroll"
+    },
+    {
+     "title": "Episode 27 - An Era of Humans",
+     "thumbnail": "https://img1.ak.crunchyroll.com/i/spire2-tmb/87a75d6cd7468397e75311ed1dee58d31710511818_full.jpg",
+     "url": "http://www.crunchyroll.com/watch/GK9U3E2EJ/an-era-of-humans",
+     "site": "Crunchyroll"
+    },
+    {
+     "title": "Episode 28 - It Would Be Embarrassing When We Met Again",
+     "thumbnail": "https://img1.ak.crunchyroll.com/i/spire1-tmb/fccf5fe3454a077e0d68299b7453e5121711114121_full.jpg",
+     "url": "http://www.crunchyroll.com/watch/G50UZ0DX4/it-would-be-embarrassing-when-we-met-again",
+     "site": "Crunchyroll"
+    }
+   ],
+   "relations": {
+    "edges": [
+     {
+      "relationType": "ADAPTATION",
+      "node": {
+       "id": 118586,
+       "type": "MANGA",
+       "format": "MANGA",
+       "episodes": null,
+       "status": "RELEASING",
+       "seasonYear": null,
+       "title": {
+        "romaji": "Sousou no Frieren",
+        "english": "Frieren: Beyond Journey’s End",
+        "native": "葬送のフリーレン"
+       },
+       "coverImage": {
+        "large": "https://s4.anilist.co/file/anilistcdn/media/manga/cover/medium/bx118586-CXKgWikBFQgS.jpg"
+       },
+       "averageScore": 87
+      }
+     },
+     {
+      "relationType": "CHARACTER",
+      "node": {
+       "id": 169811,
+       "type": "ANIME",
+       "format": "MUSIC",
+       "episodes": 1,
+       "status": "FINISHED",
+       "seasonYear": null,
+       "title": {
+        "romaji": "Yuusha",
+        "english": "The Brave",
+        "native": "勇者"
+       },
+       "coverImage": {
+        "large": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx169811-tsuH0SJVJy40.jpg"
+       },
+       "averageScore": 80
+      }
+     },
+     {
+      "relationType": "SIDE_STORY",
+      "node": {
+       "id": 170068,
+       "type": "ANIME",
+       "format": "ONA",
+       "episodes": 12,
+       "status": "FINISHED",
+       "seasonYear": 2023,
+       "title": {
+        "romaji": "Sousou no Frieren: ●● no Mahou",
+        "english": null,
+        "native": "葬送のフリーレン ～●●の魔法～"
+       },
+       "coverImage": {
+        "large": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx170068-ijY3tCP8KoWP.jpg"
+       },
+       "averageScore": 73
+      }
+     },
+     {
+      "relationType": "OTHER",
+      "node": {
+       "id": 175691,
+       "type": "ANIME",
+       "format": "MUSIC",
+       "episodes": 1,
+       "status": "FINISHED",
+       "seasonYear": null,
+       "title": {
+        "romaji": "Haru",
+        "english": "Sunny",
+        "native": "晴る"
+       },
+       "coverImage": {
+        "large": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx175691-lTfPc3P63Uyx.png"
+       },
+       "averageScore": 71
+      }
+     },
+     {
+      "relationType": "SEQUEL",
+      "node": {
+       "id": 182255,
+       "type": "ANIME",
+       "format": "TV",
+       "episodes": 10,
+       "status": "FINISHED",
+       "seasonYear": 2026,
+       "title": {
+        "romaji": "Sousou no Frieren 2nd Season",
+        "english": "Frieren: Beyond Journey’s End Season 2",
+        "native": "葬送のフリーレン 第2期"
+       },
+       "coverImage": {
+        "large": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx182255-butzrqd4I0aC.jpg"
+       },
+       "averageScore": 87
+      }
+     },
+     {
+      "relationType": "SIDE_STORY",
+      "node": {
+       "id": 189513,
+       "type": "ANIME",
+       "format": "ONA",
+       "episodes": 6,
+       "status": "FINISHED",
+       "seasonYear": 2025,
+       "title": {
+        "romaji": "Sousou no Frieren: ●● no Mahou Part 2",
+        "english": null,
+        "native": "葬送のフリーレン ～●●の魔法～ 2クール"
+       },
+       "coverImage": {
+        "large": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx189513-1R9Sryve0K53.png"
+       },
+       "averageScore": 71
+      }
+     }
+    ]
+   },
+   "characters": {
+    "edges": [
+     {
+      "role": "MAIN",
+      "node": {
+       "id": 176754,
+       "name": {
+        "full": "Frieren",
+        "native": "フリーレン"
+       },
+       "image": {
+        "large": "https://s4.anilist.co/file/anilistcdn/character/large/b176754-PCnpqIOkjhFk.png"
+       }
+      },
+      "ja": [
+       {
+        "id": 112215,
+        "name": {
+         "full": "Atsumi Tanezaki",
+         "native": "種﨑敦美"
+        },
+        "image": {
+         "large": "https://s4.anilist.co/file/anilistcdn/staff/large/n112215-kfABGD8W2YSJ.jpg"
+        }
+       }
+      ],
+      "en": [
+       {
+        "id": 119697,
+        "name": {
+         "full": "Mallorie Rodak",
+         "native": null
+        },
+        "image": {
+         "large": "https://s4.anilist.co/file/anilistcdn/staff/large/24697-qQBZowFoHEye.jpg"
+        }
+       }
+      ]
+     },
+     {
+      "role": "MAIN",
+      "node": {
+       "id": 183965,
+       "name": {
+        "full": "Fern",
+        "native": "フェルン"
+       },
+       "image": {
+        "large": "https://s4.anilist.co/file/anilistcdn/character/large/b183965-uGFohBjlFoTp.png"
+       }
+      },
+      "ja": [
+       {
+        "id": 124390,
+        "name": {
+         "full": "Kana Ichinose",
+         "native": "市ノ瀬加那"
+        },
+        "image": {
+         "large": "https://s4.anilist.co/file/anilistcdn/staff/large/n124390-03LHel2XSFel.png"
+        }
+       }
+      ],
+      "en": [
+       {
+        "id": 120733,
+        "name": {
+         "full": "Jill Harris",
+         "native": null
+        },
+        "image": {
+         "large": "https://s4.anilist.co/file/anilistcdn/staff/large/120733-oXxfxrusFmps.jpg"
+        }
+       }
+      ]
+     },
+     {
+      "role": "MAIN",
+      "node": {
+       "id": 184313,
+       "name": {
+        "full": "Stark",
+        "native": "シュタルク"
+       },
+       "image": {
+        "large": "https://s4.anilist.co/file/anilistcdn/character/large/b184313-CQl6GSt4RSny.jpg"
+       }
+      },
+      "ja": [
+       {
+        "id": 133507,
+        "name": {
+         "full": "Chiaki Kobayashi",
+         "native": "小林千晃"
+        },
+        "image": {
+         "large": "https://s4.anilist.co/file/anilistcdn/staff/large/n133507-oT1bd4Gax1Qg.jpg"
+        }
+       },
+       {
+        "id": 115100,
+        "name": {
+         "full": "Arisa Kiyoto",
+         "native": "清都ありさ"
+        },
+        "image": {
+         "large": "https://s4.anilist.co/file/anilistcdn/staff/large/20100.jpg"
+        }
+       }
+      ],
+      "en": [
+       {
+        "id": 148764,
+        "name": {
+         "full": "Jordan Dash Cruz",
+         "native": null
+        },
+        "image": {
+         "large": "https://s4.anilist.co/file/anilistcdn/staff/large/n148764-jKjUXzYlCikt.jpg"
+        }
+       },
+       {
+        "id": 95414,
+        "name": {
+         "full": "Brittney Karbowski",
+         "native": null
+        },
+        "image": {
+         "large": "https://s4.anilist.co/file/anilistcdn/staff/large/414.jpg"
+        }
+       }
+      ]
+     },
+     {
+      "role": "SUPPORTING",
+      "node": {
+       "id": 184311,
+       "name": {
+        "full": "Himmel",
+        "native": "ヒンメル"
+       },
+       "image": {
+        "large": "https://s4.anilist.co/file/anilistcdn/character/large/b184311-wQFySqYXEqf1.png"
+       }
+      },
+      "ja": [
+       {
+        "id": 95270,
+        "name": {
+         "full": "Nobuhiko Okamoto",
+         "native": "岡本信彦"
+        },
+        "image": {
+         "large": "https://s4.anilist.co/file/anilistcdn/staff/large/n95270-LqNIF238L59u.png"
+        }
+       }
+      ],
+      "en": [
+       {
+        "id": 119609,
+        "name": {
+         "full": "Clifford Chapin",
+         "native": null
+        },
+        "image": {
+         "large": "https://s4.anilist.co/file/anilistcdn/staff/large/n119609-0LGmxEBb7PS9.jpg"
+        }
+       }
+      ]
+     },
+     {
+      "role": "SUPPORTING",
+      "node": {
+       "id": 184310,
+       "name": {
+        "full": "Heiter",
+        "native": "ハイター"
+       },
+       "image": {
+        "large": "https://s4.anilist.co/file/anilistcdn/character/large/b184310-tiXvrq4FINXP.jpg"
+       }
+      },
+      "ja": [
+       {
+        "id": 95236,
+        "name": {
+         "full": "Hiroki Touchi",
+         "native": "東地宏樹"
+        },
+        "image": {
+         "large": "https://s4.anilist.co/file/anilistcdn/staff/large/n95236-nlMo4dnjdT8p.png"
+        }
+       }
+      ],
+      "en": [
+       {
+        "id": 95039,
+        "name": {
+         "full": "Jason Douglas",
+         "native": null
+        },
+        "image": {
+         "large": "https://s4.anilist.co/file/anilistcdn/staff/large/n95039-F0UuxfqLslls.jpg"
+        }
+       }
+      ]
+     },
+     {
+      "role": "SUPPORTING",
+      "node": {
+       "id": 184312,
+       "name": {
+        "full": "Eisen",
+        "native": "アイゼン"
+       },
+       "image": {
+        "large": "https://s4.anilist.co/file/anilistcdn/character/large/b184312-kxd5H6iOHIq4.png"
+       }
+      },
+      "ja": [
+       {
+        "id": 95926,
+        "name": {
+         "full": "Youji Ueda",
+         "native": "上田燿司"
+        },
+        "image": {
+         "large": "https://s4.anilist.co/file/anilistcdn/staff/large/n95926-00Pd2b8WZwQS.png"
+        }
+       }
+      ],
+      "en": [
+       {
+        "id": 116333,
+        "name": {
+         "full": "Chris Guerrero",
+         "native": null
+        },
+        "image": {
+         "large": "https://s4.anilist.co/file/anilistcdn/staff/large/21333.jpg"
+        }
+       }
+      ]
+     },
+     {
+      "role": "SUPPORTING",
+      "node": {
+       "id": 219733,
+       "name": {
+        "full": "Flamme",
+        "native": "フランメ"
+       },
+       "image": {
+        "large": "https://s4.anilist.co/file/anilistcdn/character/large/b219733-FgXseEhMdDE9.png"
+       }
+      },
+      "ja": [
+       {
+        "id": 95100,
+        "name": {
+         "full": "Atsuko Tanaka",
+         "native": "田中敦子"
+        },
+        "image": {
+         "large": "https://s4.anilist.co/file/anilistcdn/staff/large/n95100-v07xvA8V2Yeh.png"
+        }
+       }
+      ],
+      "en": [
+       {
+        "id": 95511,
+        "name": {
+         "full": "Lydia Mackay",
+         "native": null
+        },
+        "image": {
+         "large": "https://s4.anilist.co/file/anilistcdn/staff/large/511.jpg"
+        }
+       }
+      ]
+     },
+     {
+      "role": "SUPPORTING",
+      "node": {
+       "id": 315278,
+       "name": {
+        "full": "Qual",
+        "native": "クヴァール"
+       },
+       "image": {
+        "large": "https://s4.anilist.co/file/anilistcdn/character/large/b315278-PKRDf4IJJ1GK.png"
+       }
+      },
+      "ja": [
+       {
+        "id": 95025,
+        "name": {
+         "full": "Hiroki Yasumoto",
+         "native": "安元洋貴"
+        },
+        "image": {
+         "large": "https://s4.anilist.co/file/anilistcdn/staff/large/n95025-LGHr4VufmfCc.jpg"
+        }
+       }
+      ],
+      "en": [
+       {
+        "id": 138011,
+        "name": {
+         "full": "Major Attaway",
+         "native": null
+        },
+        "image": {
+         "large": "https://s4.anilist.co/file/anilistcdn/staff/large/n138011-QVIVC2KA2B3C.png"
+        }
+       }
+      ]
+     },
+     {
+      "role": "SUPPORTING",
+      "node": {
+       "id": 205177,
+       "name": {
+        "full": "Sein",
+        "native": "ザイン"
+       },
+       "image": {
+        "large": "https://s4.anilist.co/file/anilistcdn/character/large/b205177-hLV4nVQjoBIC.png"
+       }
+      },
+      "ja": [
+       {
+        "id": 95513,
+        "name": {
+         "full": "Yuuichi Nakamura",
+         "native": "中村悠一"
+        },
+        "image": {
+         "large": "https://s4.anilist.co/file/anilistcdn/staff/large/n95513-up9ZDuocHgRs.png"
+        }
+       },
+       {
+        "id": 151445,
+        "name": {
+         "full": "Natsumi Kawaida",
+         "native": "川井田夏海"
+        },
+        "image": {
+         "large": "https://s4.anilist.co/file/anilistcdn/staff/large/n151445-3qF3EB619d74.png"
+        }
+       }
+      ],
+      "en": [
+       {
+        "id": 117629,
+        "name": {
+         "full": "Christopher Wehkamp",
+         "native": null
+        },
+        "image": {
+         "large": "https://s4.anilist.co/file/anilistcdn/staff/large/n117629-w22t54KeomD3.jpg"
+        }
+       }
+      ]
+     },
+     {
+      "role": "SUPPORTING",
+      "node": {
+       "id": 219110,
+       "name": {
+        "full": "Aura",
+        "native": "アウラ"
+       },
+       "image": {
+        "large": "https://s4.anilist.co/file/anilistcdn/character/large/b219110-LEB5T4oG0gel.png"
+       }
+      },
+      "ja": [
+       {
+        "id": 101996,
+        "name": {
+         "full": "Ayana Taketatsu",
+         "native": "竹達彩奈"
+        },
+        "image": {
+         "large": "https://s4.anilist.co/file/anilistcdn/staff/large/n101996-7GM2C37RembP.jpg"
+        }
+       }
+      ],
+      "en": [
+       {
+        "id": 210371,
+        "name": {
+         "full": "Corey Pettit",
+         "native": null
+        },
+        "image": {
+         "large": "https://s4.anilist.co/file/anilistcdn/staff/large/n210371-JfKEvtmmKkey.jpg"
+        }
+       }
+      ]
+     },
+     {
+      "role": "SUPPORTING",
+      "node": {
+       "id": 219732,
+       "name": {
+        "full": "Kraft",
+        "native": "クラフト"
+       },
+       "image": {
+        "large": "https://s4.anilist.co/file/anilistcdn/character/large/b219732-GKmSY9oTm6cR.jpg"
+       }
+      },
+      "ja": [
+       {
+        "id": 95160,
+        "name": {
+         "full": "Takehito Koyasu",
+         "native": "子安武人"
+        },
+        "image": {
+         "large": "https://s4.anilist.co/file/anilistcdn/staff/large/n95160-jWevcH7BmfE1.jpg"
+        }
+       }
+      ],
+      "en": [
+       {
+        "id": 100361,
+        "name": {
+         "full": "Orion Pitts",
+         "native": null
+        },
+        "image": {
+         "large": "https://s4.anilist.co/file/anilistcdn/staff/large/5361.jpg"
+        }
+       }
+      ]
+     },
+     {
+      "role": "SUPPORTING",
+      "node": {
+       "id": 219734,
+       "name": {
+        "full": "Serie",
+        "native": "ゼーリエ"
+       },
+       "image": {
+        "large": "https://s4.anilist.co/file/anilistcdn/character/large/b219734-aS4UMAb16DGd.jpg"
+       }
+      },
+      "ja": [
+       {
+        "id": 95655,
+        "name": {
+         "full": "Mariya Ise",
+         "native": "伊瀬茉莉也"
+        },
+        "image": {
+         "large": "https://s4.anilist.co/file/anilistcdn/staff/large/n95655-cR519BXmteKA.png"
+        }
+       }
+      ],
+      "en": [
+       {
+        "id": 105292,
+        "name": {
+         "full": "Anastasia Muñoz",
+         "native": null
+        },
+        "image": {
+         "large": "https://s4.anilist.co/file/anilistcdn/staff/large/10292.jpg"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "recommendations": {
+    "nodes": [
+     {
+      "mediaRecommendation": {
+       "id": 21827,
+       "title": {
+        "romaji": "Violet Evergarden",
+        "english": "Violet Evergarden",
+        "native": "ヴァイオレット・エヴァーガーデン"
+       },
+       "format": "TV",
+       "episodes": 13,
+       "averageScore": 85,
+       "coverImage": {
+        "large": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx21827-ubzq619ZA2E9.png"
+       }
+      }
+     },
+     {
+      "mediaRecommendation": {
+       "id": 153518,
+       "title": {
+        "romaji": "Dungeon Meshi",
+        "english": "Delicious in Dungeon",
+        "native": "ダンジョン飯"
+       },
+       "format": "TV",
+       "episodes": 24,
+       "averageScore": 85,
+       "coverImage": {
+        "large": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx153518-IVXPDY5ph3kO.jpg"
+       }
+      }
+     },
+     {
+      "mediaRecommendation": {
+       "id": 112609,
+       "title": {
+        "romaji": "Majo no Tabitabi",
+        "english": "Wandering Witch: The Journey of Elaina",
+        "native": "魔女の旅々"
+       },
+       "format": "TV",
+       "episodes": 12,
+       "averageScore": 74,
+       "coverImage": {
+        "large": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx112609-hBCbnYlEHluz.jpg"
+       }
+      }
+     },
+     {
+      "mediaRecommendation": {
+       "id": 114535,
+       "title": {
+        "romaji": "Fumetsu no Anata e",
+        "english": "To Your Eternity",
+        "native": "不滅のあなたへ"
+       },
+       "format": "TV",
+       "episodes": 20,
+       "averageScore": 81,
+       "coverImage": {
+        "large": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx114535-y3NnjexcqKG1.jpg"
+       }
+      }
+     },
+     {
+      "mediaRecommendation": {
+       "id": 147105,
+       "title": {
+        "romaji": "Tongari Boushi no Atelier",
+        "english": "Witch Hat Atelier",
+        "native": "とんがり帽子のアトリエ"
+       },
+       "format": "ONA",
+       "episodes": 13,
+       "averageScore": 85,
+       "coverImage": {
+        "large": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx147105-rwOX8qyUy8gV.jpg"
+       }
+      }
+     },
+     {
+      "mediaRecommendation": {
+       "id": 457,
+       "title": {
+        "romaji": "Mushishi",
+        "english": "MUSHI-SHI",
+        "native": "蟲師"
+       },
+       "format": "TV",
+       "episodes": 26,
+       "averageScore": 85,
+       "coverImage": {
+        "large": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx457-l6cTtNgI9Bi6.png"
+       }
+      }
+     },
+     {
+      "mediaRecommendation": {
+       "id": 161645,
+       "title": {
+        "romaji": "Kusuriya no Hitorigoto",
+        "english": "The Apothecary Diaries",
+        "native": "薬屋のひとりごと"
+       },
+       "format": "TV",
+       "episodes": 24,
+       "averageScore": 88,
+       "coverImage": {
+        "large": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx161645-QLbzHXiYRgV2.jpg"
+       }
+      }
+     },
+     {
+      "mediaRecommendation": {
+       "id": 99420,
+       "title": {
+        "romaji": "Shoujo Shuumatsu Ryokou",
+        "english": "Girls' Last Tour",
+        "native": "少女終末旅行"
+       },
+       "format": "TV",
+       "episodes": 12,
+       "averageScore": 82,
+       "coverImage": {
+        "large": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx99420-k5Tel6yRMwA8.png"
+       }
+      }
+     },
+     {
+      "mediaRecommendation": {
+       "id": 486,
+       "title": {
+        "romaji": "Kino no Tabi: the Beautiful World",
+        "english": "Kino's Journey",
+        "native": "キノの旅 -the Beautiful World-"
+       },
+       "format": "TV",
+       "episodes": 13,
+       "averageScore": 81,
+       "coverImage": {
+        "large": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx486-xXUgNOEBuxGs.jpg"
+       }
+      }
+     },
+     {
+      "mediaRecommendation": {
+       "id": 99457,
+       "title": {
+        "romaji": "Sayonara no Asa ni Yakusoku no Hana wo Kazarou",
+        "english": "Maquia: When the Promised Flower Blooms",
+        "native": "さよならの朝に約束の花をかざろう"
+       },
+       "format": "MOVIE",
+       "episodes": 1,
+       "averageScore": 82,
+       "coverImage": {
+        "large": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx99457-OD0xtM8NlHNQ.png"
+       }
+      }
+     },
+     {
+      "mediaRecommendation": {
+       "id": 145728,
+       "title": {
+        "romaji": "Ookami to Koushinryou: MERCHANT MEETS THE WISE WOLF",
+        "english": "Spice and Wolf: MERCHANT MEETS THE WISE WOLF",
+        "native": "狼と香辛料 MERCHANT MEETS THE WISE WOLF"
+       },
+       "format": "TV",
+       "episodes": 25,
+       "averageScore": 79,
+       "coverImage": {
+        "large": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx145728-YUKXjN2E81Pq.jpg"
+       }
+      }
+     },
+     {
+      "mediaRecommendation": {
+       "id": 179966,
+       "title": {
+        "romaji": "Silent Witch: Chinmoku no Majo no Kakushigoto",
+        "english": "Secrets of the Silent Witch",
+        "native": "サイレント・ウィッチ 沈黙の魔女の隠しごと"
+       },
+       "format": "TV",
+       "episodes": 13,
+       "averageScore": 81,
+       "coverImage": {
+        "large": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx179966-g0EU7rVe2Og7.jpg"
+       }
+      }
+     }
+    ]
+   }
+  }
+ }
+}
