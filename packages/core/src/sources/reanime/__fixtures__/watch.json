@@ -1,0 +1,17 @@
+{
+ "anime": {
+  "anime_id": "frieren-beyond-journey-s-end-yw2a3j",
+  "title": {
+   "english": "Frieren: Beyond Journey’s End",
+   "native": "葬送のフリーレン",
+   "romaji": "Sousou no Frieren",
+   "user_preferred": "Sousou no Frieren"
+  },
+  "cover_image": {
+   "color": "#bbf1a1",
+   "extra_large": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx154587-qQTzQnEJJ3oB.jpg",
+   "large": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx154587-qQTzQnEJJ3oB.jpg",
+   "medium": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/small/bx154587-qQTzQnEJJ3oB.jpg"
+  }
+ }
+}

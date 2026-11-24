@@ -1,0 +1,80 @@
+{
+ "components": [
+  {
+   "snapshot": "FIXTURE_SNAPSHOT_AFTER_PAGE_2",
+   "effects": {
+    "dispatches": [
+     {
+      "name": "items-loaded",
+      "params": {
+       "items": [
+        {
+         "slug": "25",
+         "url": "http://anizone.to/anime/ul5zmckr/25",
+         "title_list": {
+          "1": "Penetrate the Center with an Enormous Bombshell?",
+          "2": "Pénétrer au centre d`une énorme bombe",
+          "5": "Kyodai Houdan de Chuuoutoppa?",
+          "8": "巨大砲弾で中央突破?",
+          "13": "¿Penetrar al centro con una bala enorme?"
+         },
+         "summary": "With some advice from Ganju, Ichigo is finally able to control his spiritual energy in order to create the Cannonball.  Now that they are ready to go, Yoruichi gives the group directions on what to do when they get to Soul Society.  But Ichigo is totally spent from practice and falls asleep.  Next to the sleeping Ichigo, Ganju feverishly practices the words that will control the Cannonball.  He has decided to go to Soul Society with the group.  And just before their departure, he explains the reason for his hatred of Soul Reapers.",
+         "is_unsafe": false,
+         "type": "Regular Episode",
+         "air_date": "2005-03-29",
+         "air_diff": "21 years ago",
+         "videos_count": 1,
+         "duration": "24:08",
+         "snapshot": "https://seiryuu.vid-cdn.xyz/7281185c-32b1-41c2-942f-0e39271c8fb6/snapshot.webp",
+         "teaser": "https://seiryuu.vid-cdn.xyz/7281185c-32b1-41c2-942f-0e39271c8fb6/teaser.webp"
+        },
+        {
+         "slug": "26",
+         "url": "http://anizone.to/anime/ul5zmckr/26",
+         "title_list": {
+          "1": "Formation! The Worst Tag",
+          "2": "Formation ! Le plus mauvais grade",
+          "5": "Kessei! Saiaku no Tag",
+          "8": "結成! 最悪のタッグ",
+          "13": "¡Formación! La peor reputación"
+         },
+         "summary": "The Cannonball is launched, and Ichigo and company make it over Seireitai.  But because Ichigo is unable to control his spiritual power, they become stuck within the shakonaku (Soul Shield Membrane).  Ichigo and the others desperately try to collect their spiritual energy, but in that instant, the Cannonball explodes and everyone begins a descent towards Seireitei -- Ishida with Orihime, Chad, Yoriuchi, and finally, Ichigo with Ganju.  Ichigo and Ganju make a safe landing, but are confronted by Ikkaku and Yumichika, two Soul Reapers.",
+         "is_unsafe": false,
+         "type": "Regular Episode",
+         "air_date": "2005-04-05",
+         "air_diff": "21 years ago",
+         "videos_count": 1,
+         "duration": "24:10",
+         "snapshot": "https://seiryuu.vid-cdn.xyz/812875ef-a3e1-4d77-a3de-d41326831315/snapshot.webp",
+         "teaser": "https://seiryuu.vid-cdn.xyz/812875ef-a3e1-4d77-a3de-d41326831315/teaser.webp"
+        },
+        {
+         "slug": "27",
+         "url": "http://anizone.to/anime/ul5zmckr/27",
+         "title_list": {
+          "1": "Release the Death Blow!",
+          "2": "Lancer le coup de la mort",
+          "5": "Hissatsu no Ichigeki o Houte!",
+          "8": "必殺の一撃を放て!",
+          "13": "¡Lanza el golpe de gracia!"
+         },
+         "summary": "Inside the Seireitei, orders are given and a full-fledged search for the Ryoka is called into action.  Rukia is transferred to the Shishinro Repentence Cell to await her execution and it is becomes more imperative that Ichigo and his fellow Ryoka learn of her whereabouts soon.  Ichigo and Ikkaku`s fight dramatically comes to a close; Ganju and Yumichika challenge each other`s tempers during their continued battle; and Uryu and Orihime find themselves trapped in a raucous chase by a group of Soul Reapers.",
+         "is_unsafe": false,
+         "type": "Regular Episode",
+         "air_date": "2005-04-12",
+         "air_diff": "21 years ago",
+         "videos_count": 1,
+         "duration": "24:10",
+         "snapshot": "https://seiryuu.vid-cdn.xyz/15296e36-f896-443e-bfea-215670cf1275/snapshot.webp",
+         "teaser": "https://seiryuu.vid-cdn.xyz/15296e36-f896-443e-bfea-215670cf1275/teaser.webp"
+        }
+       ],
+       "nextCursor": null,
+       "hasMore": false
+      }
+     }
+    ]
+   }
+  }
+ ]
+}
