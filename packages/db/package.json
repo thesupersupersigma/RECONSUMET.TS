@@ -1,0 +1,40 @@
+{
+  "name": "@reconsumet/db",
+  "version": "0.3.0",
+  "description": "RECONSUMΣT.TS Postgres storage: schema, migrations, catalog/mapping/cache stores",
+  "license": "GPL-3.0-or-later",
+  "author": "thesupersupersigma",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "drizzle"
+  ],
+  "engines": {
+    "node": ">=26"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:live": "vitest run --config vitest.live.config.ts",
+    "generate": "drizzle-kit generate"
+  },
+  "dependencies": {
+    "@reconsumet/core": "workspace:*",
+    "drizzle-orm": "^0.45.4",
+    "postgres": "^4.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.1",
+    "drizzle-kit": "^0.31.11",
+    "@electric-sql/pglite": "^0.6.0"
+  }
+}
