@@ -3,6 +3,10 @@
 </p>
 
 <p align="center">
+  <a href="https://discord.gg/trvtVNWzaf"><img src="https://img.shields.io/badge/discord-join-5865F2" alt="Discord"></a>
+</p>
+
+<p align="center">
   A <b>self-hostable</b> anime aggregator — a TypeScript scraping library plus a small
   HTTP API with a built-in HLS + subtitle proxy, so streams play in a normal browser.
 </p>

@@ -57,3 +57,6 @@ important.md
 *.local.log
 *.local.json
 _*.txt
+
+# Untouched upstream source, kept for reference only
+/_reference/
