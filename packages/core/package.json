@@ -1,6 +1,6 @@
 {
   "name": "@reconsumet/core",
-  "version": "0.4.2",
+  "version": "0.6.0",
   "description": "RECONSUMΣT.TS core: fetch layer, anime catalog, AniList client, sources and AniList→source matching",
   "license": "GPL-3.0-or-later",
   "author": "thesupersupersigma",

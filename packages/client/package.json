@@ -1,6 +1,6 @@
 {
   "name": "@reconsumet/client",
-  "version": "0.4.2",
+  "version": "0.6.0",
   "description": "Typed client for a RECONSUMΣT.TS API server (Hono RPC)",
   "license": "GPL-3.0-or-later",
   "author": "thesupersupersigma",

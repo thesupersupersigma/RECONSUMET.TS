@@ -5,7 +5,7 @@
 <p align="center">
   <a href="https://discord.gg/trvtVNWzaf"><img src="https://img.shields.io/badge/discord-join-5865F2" alt="Discord"></a>
   <img src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue" alt="License: GPL-3.0-or-later">
-  <img src="https://img.shields.io/badge/version-0.4.2-orange" alt="Version 0.4.2">
+  <img src="https://img.shields.io/badge/version-0.6.0-orange" alt="Version 0.6.0">
   <a href="https://www.npmjs.com/package/@reconsumet/core"><img src="https://img.shields.io/npm/v/@reconsumet/core?label=%40reconsumet%2Fcore" alt="npm @reconsumet/core"></a>
   <a href="https://www.npmjs.com/package/@reconsumet/client"><img src="https://img.shields.io/npm/v/@reconsumet/client?label=%40reconsumet%2Fclient" alt="npm @reconsumet/client"></a>
 </p>
@@ -15,7 +15,7 @@
 A self-hostable anime aggregator: a TypeScript scraping library plus an HTTP API with a built-in HLS + subtitle proxy.
 It turns an AniList ID and an episode number into playable streams from whichever sources currently work.
 
-**Status: v0.4.2 — API + relay, self-hostable by anyone; library and typed client on npm.** v2 is being rewritten from scratch. RECONSUMΣT.TS is now a service: an HTTP API
+**Status: v0.6.0 — API + relay, self-hostable by anyone; library and typed client on npm; anime-page details and skip times.** v2 is being rewritten from scratch. RECONSUMΣT.TS is now a service: an HTTP API
 (Hono, OpenAPI at `/docs`, API keys, rate limits, scheduled jobs, Postgres) that turns an AniList ID + episode number into
 streams from **Re:Anime** and **AniZone**, and a separate **video relay** that serves every playlist, segment and
 subtitle behind sealed, short-lived links ([docs/api.md](docs/api.md), [docs/relay.md](docs/relay.md),
