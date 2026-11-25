@@ -29,7 +29,7 @@ from any other address. Off by default: phones switching between Wi-Fi and mobil
 
 ### Anime details
 
-One AniList request per anime (≈ 16 KB for a movie, 28 KB for Frieren, 66 KB for One Piece with its 65 relations;
+One AniList request per anime (≈ 16 KB for a movie, 24 KB for Frieren, 66 KB for One Piece with its 65 relations;
 measured 2026-11-24). Besides titles, format, dates, cover, next airing and relations, an answer has:
 
 | Field | Notes |
